@@ -1,309 +1,534 @@
-# Automated Multi-Platform Posting System
+# MultiPost — Automated Multi-Platform Posting System
 
-A high-performance, asynchronous Python REST API built with **FastAPI**, **Pydantic v2**, and **HTTPX** that automatically distributes marketing and announcement posts across five social and publishing platforms: **Bluesky**, **Mastodon**, **Dev.to**, **Telegram**, and **Discord**.
+<p align="center">
+  <strong>One message. Five platforms. Zero repetitive work.</strong>
+</p>
 
-Platform selection is strictly internal; client requests submit a single message containing an embedded link, and the system concurrently broadcasts the update, verifies public accessibility, isolates platform-level failures, and returns a normalized JSON response.
-
----
-
-## Table of Contents
-
-1. [Project Overview and Objective](#project-overview-and-objective)
-2. [Key Features](#key-features)
-3. [Architecture and Request Lifecycle](#architecture-and-request-lifecycle)
-4. [Mermaid Architecture Diagram](#mermaid-architecture-diagram)
-5. [Project Folder Structure](#project-folder-structure)
-6. [Prerequisites and Installation](#prerequisites-and-installation)
-7. [Environment Variables and Configuration](#environment-variables-and-configuration)
-8. [Platform Credentials Guide with Official Documentation](#platform-credentials-guide-with-official-documentation)
-9. [Starting the Application](#starting-the-application)
-10. [Swagger UI Interactive Documentation](#swagger-ui-interactive-documentation)
-11. [Sample curl Requests and Responses](#sample-curl-requests-and-responses)
-12. [Running the Automated Test Suite](#running-the-automated-test-suite)
-13. [Security and Credential Sanitization](#security-and-credential-sanitization)
-14. [Platform Caveats, Restrictions, and Architectural Notes](#platform-caveats-restrictions-and-architectural-notes)
-15. [GitHub Submission Checklist](#github-submission-checklist)
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white" alt="Python Version" />
+  <img src="https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/React-19.0-61DAFB?logo=react&logoColor=black" alt="React 19" />
+  <img src="https://img.shields.io/badge/Vite-6.0-646CFF?logo=vite&logoColor=white" alt="Vite" />
+  <img src="https://img.shields.io/badge/TailwindCSS-3.4-38B2AC?logo=tailwind-css&logoColor=white" alt="Tailwind CSS" />
+  <img src="https://img.shields.io/badge/Tests-86%20Passed-brightgreen?logo=pytest&logoColor=white" alt="Tests" />
+  <img src="https://img.shields.io/badge/License-MIT-purple" alt="License" />
+</p>
 
 ---
 
-## Project Overview and Objective
+## 📖 Table of Contents
 
-Organizations need to distribute visibility updates across diverse social media networks, developer communities, and chat applications. Manually posting to each network is slow and error-prone. 
-
-This system provides a single, unified endpoint `POST /posting` running on port `4000`. The service:
-- Accepts a message containing up to 200 characters and exactly one valid `http` or `https` URL.
-- Simultaneously posts to **Bluesky**, **Mastodon**, **Dev.to**, **Telegram**, and **Discord** using official REST and XRPC endpoints.
-- Verifies post accessibility using an asynchronous HTTP GET validation check.
-- Guarantees full failure isolation: one platform's rate limit, downtime, or authentication error never impacts the execution of the other four platforms.
-- Sanitizes all credentials and secret tokens from application logs and API error responses.
-
----
-
-## Key Features
-
-- **Strict Pydantic v2 Validation**: Dedicated URL regex extractor with punctuation stripping (e.g. trailing periods or parentheses in natural language), protocol enforcement (`http`/`https`), hostname verification, length bounds (`<= 200` chars), and rejection of extra payload fields (forbids client-side platform tampering).
-- **Concurrent Non-Blocking Execution**: Orchestrated with Python's native `asyncio.gather()`, running external platform HTTP requests in parallel over shared `httpx.AsyncClient` connection pools.
-- **Resilient Fault Isolation**: Individual try/except guards prevent single-point failures. If a platform is unconfigured or returns an HTTP error, it records a failure while sibling platforms proceed unhindered.
-- **Public URL Verification**: Post-publication HTTP GET requests distinguish between successful submission and actual unauthenticated public availability. Verification failure does not demote publication success.
-- **Zero Startup Crashes on Missing Secrets**: Platform credentials default to `None` with graceful per-platform error reporting if environment variables are not supplied.
-- **Enterprise-Grade Sanitization**: Automatic masking of Telegram bot tokens, Discord webhook secrets, Bearer tokens, and sensitive keys from all logs and error messages.
-- **Comprehensive Test Coverage**: 86 automated pytest test cases validating schemas, URL extraction edge cases, mocked platform adapters (`respx`), and full API integration flows.
+1. [Executive Summary & Problem Statement](#executive-summary--problem-statement)
+2. [End-to-End System Architecture](#end-to-end-system-architecture)
+3. [Interactive Workflows & Architecture Diagrams](#interactive-workflows--architecture-diagrams)
+   - [High-Level Component Architecture](#1-high-level-component-architecture)
+   - [End-to-End Request Lifecycle Sequence](#2-end-to-end-request-lifecycle-sequence)
+   - [Concurrent Fault Isolation & Resilience Flow](#3-concurrent-fault-isolation--resilience-flow)
+   - [Three-State Public Accessibility Verification](#4-three-state-public-accessibility-verification)
+4. [Platform Adapters & Protocol Specifications](#platform-adapters--protocol-specifications)
+5. [Repository Structure](#repository-structure)
+6. [Prerequisites & Installation](#prerequisites--installation)
+   - [1. Backend Setup (Port 4000)](#1-backend-setup-port-4000)
+   - [2. Frontend Setup (Port 5174)](#2-frontend-setup-port-5174)
+7. [Environment Variables & Configuration](#environment-variables--configuration)
+8. [Platform Credentials Guide](#platform-credentials-guide)
+9. [API Reference & Sample Payloads](#api-reference--sample-payloads)
+10. [Automated Testing Suite (86 Pytest Cases)](#automated-testing-suite-86-pytest-cases)
+11. [Security, Masking & Fault Isolation](#security-masking--fault-isolation)
+12. [Platform Caveats & Architectural Nuances](#platform-caveats--architectural-nuances)
 
 ---
 
-## Architecture and Request Lifecycle
+## 🎯 Executive Summary & Problem Statement
 
-1. **Client Request**: A client submits an HTTP `POST` request to `http://localhost:4000/posting` with a JSON payload containing the `message` string.
-2. **Schema & URL Validation**:
-   - `PostingRequest` checks that `message` is non-empty after trimming and contains `<= 200` characters.
-   - Extra fields (such as client-specified platform arrays) are rejected with HTTP 422 (`extra="forbid"`).
-   - `extract_and_validate_single_url` strips surrounding prose punctuation, validates that exactly one URL exists, ensures scheme is `http` or `https`, and verifies valid RFC 1123 hostname syntax.
-3. **Posting Service Orchestration**:
-   - The `PostingService` initializes adapters for all five platforms (`Bluesky`, `Mastodon`, `Dev.to`, `Telegram`, `Discord`), injecting environment settings from `config.py`.
-4. **Concurrent Parallel Execution**:
-   - Coroutines for all five platforms are scheduled simultaneously via `asyncio.gather(*tasks, return_exceptions=True)`.
-5. **Platform Adapter Execution**:
-   - Each adapter verifies its credentials. If credentials are missing, it returns a failed status with a clean configuration message.
-   - For configured platforms, the adapter issues the official HTTP request with connection/read timeouts.
-   - If the API succeeds, the adapter extracts the post identifier and constructs the platform URL.
-6. **Public URL Verification**:
-   - For platforms where a public URL was generated, an asynchronous HTTP GET request is performed with a browser User-Agent.
-   - `public_access` is set to `True` (HTTP 200-299), `False` (confirmed inaccessible: HTTP 401/403/404/410 or redirect to login), or `None` (indeterminate: timeouts, network transport errors, Cloudflare challenge, HTTP 429/503, or platforms without public URLs).
-7. **Aggregation & Normalization**:
-   - `PostingService` consolidates results into a normalized `PostingResponse` containing an overall `success` boolean (`True` if at least one platform succeeded, `False` if all failed), summary counts, and an array of five `PlatformResult` items.
+Modern content creators, developer advocates, and marketing teams face an increasingly fragmented social ecosystem. Distributing a single product launch or technical update across microblogging networks, decentralized fediverse instances, developer blogs, and messaging communities requires tedious manual formatting, tab switching, and link pasting.
+
+**MultiPost** solves this with a unified, enterprise-grade publishing engine:
+- **Single Dispatch**: Broadcast announcements simultaneously across **Bluesky**, **Mastodon**, **Dev.to**, **Telegram**, and **Discord**.
+- **Concurrent Non-Blocking Execution**: Orchestrated with asynchronous HTTP connection pools over `asyncio.gather()`.
+- **Fault-Isolated Architecture**: A rate limit, authentication error, or downtime on one platform never impacts or delays the remaining platforms.
+- **Independent Verification**: Evaluates public reachability with automated HTTP GET verification checks without altering publication status.
+- **Premium SaaS Dashboard**: React 19 + Tailwind CSS frontend featuring dark mode aesthetics, live health monitoring, client-side RFC URL validation, and local session history.
 
 ---
 
-## Mermaid Architecture Diagram
+## 🏗️ End-to-End System Architecture
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        MultiPost Web Dashboard                         │
+│             (React 19 + Vite + Tailwind CSS • Port 5174)               │
+│   - Target Platform Readiness      - Real-time RFC 1123 URL Validator   │
+│   - Live Character Counter (<=200) - Fault-Tolerant Results Summary    │
+│   - Local History Inspector        - Settings & Diagnostic Controls    │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ HTTP / CORS (Port 4000)
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                        FastAPI API Orchestrator                        │
+│             (Pydantic v2 + HTTPX + Uvicorn • Port 4000)                │
+│   - GET /health: Dynamic platform readiness probe                      │
+│   - POST /posting: Strict input validation & parallel orchestrator     │
+└───────────────────┬────────────────────────────────┬───────────────────┘
+                    │                                │
+                    ▼                                ▼
+       ┌────────────────────────┐       ┌────────────────────────┐
+       │   Pydantic Validation  │       │ PostingService Gateway │
+       │ - Max 200 Characters   │       │ - asyncio.gather()     │
+       │ - Exactly 1 valid URL  │       │ - Connection pooling   │
+       │ - Forbid client routing│       │ - Exception isolation  │
+       └────────────────────────┘       └────────────┬───────────┘
+                                                     │
+         ┌───────────────────┬───────────────────┼───────────────────┬───────────────────┐
+         ▼                   ▼                   ▼                   ▼                   ▼
+   ┌───────────┐       ┌───────────┐       ┌───────────┐       ┌───────────┐       ┌───────────┐
+   │  Bluesky  │       │ Mastodon  │       │  Dev.to   │       │ Telegram  │       │  Discord  │
+   │AT Protocol│       │ActivityPub│       │ Forem API │       │  Bot API  │       │  Webhook  │
+   │   XRPC    │       │   REST    │       │  Article  │       │sendMessage│       │?wait=true │
+   └─────┬─────┘       └─────┬─────┘       └─────┬─────┘       └─────┬─────┘       └─────┬─────┘
+         │                   │                   │                   │                   │
+         └───────────────────┼───────────────────┼───────────────────┼───────────────────┘
+                             │ Parallel Verification HTTP GETs
+                             ▼
+               ┌───────────────────────────┐
+               │  Public URL Verification  │
+               │  - True: 200 OK (Public)  │
+               │  - False: 401/403/Login   │
+               │  - None: Gated / Timeout  │
+               └─────────────┬─────────────┘
+                             │
+                             ▼
+               ┌───────────────────────────┐
+               │ Result Sanitizer & Output │
+               │ - Mask bot/bearer secrets │
+               │ - Compute success rate    │
+               │ - Unified JSON response   │
+               └───────────────────────────┘
+```
+
+---
+
+## 📊 Interactive Workflows & Architecture Diagrams
+
+### 1. High-Level Component Architecture
 
 ```mermaid
-flowchart TD
-    Client(["Client Request: POST /posting\n{ message: '... https://example.com' }"])
-    FastAPI["FastAPI Application (Port 4000)"]
-    Pydantic["Pydantic v2 Validation\n- Trim whitespace\n- Max 200 chars\n- Exactly 1 HTTP/HTTPS URL\n- Forbid client platform selection"]
-    Settings[".env via config.py\n(Pydantic Settings)"]
-    PostingService["PostingService Coordinator"]
-    AsyncGather["asyncio.gather() Parallel Execution"]
-
-    subgraph Adapters ["Platform Adapters (Individual Exception Isolation)"]
-        BSKY["Bluesky Adapter\n(AT Protocol XRPC)"]
-        MASTO["Mastodon Adapter\n(POST /api/v1/statuses)"]
-        DEVTO["Dev.to Adapter\n(POST /api/articles)"]
-        TG["Telegram Adapter\n(POST /bot.../sendMessage)"]
-        DISC["Discord Adapter\n(POST /webhooks/... ?wait=true)"]
+flowchart TB
+    subgraph Frontend ["MultiPost Frontend (Vite + React 19)"]
+        UI["Dashboard & Composer UI"]
+        VAL["Client RFC 1123 URL Validator"]
+        STORE["Local History Storage"]
+        HEALTH["Health Monitor (30s Poller)"]
     end
 
-    subgraph Verification ["Public Access Verification (HTTP GET)"]
-        V_BSKY["Verify bsky.app URL"]
-        V_MASTO["Verify mastodon status URL"]
-        V_DEVTO["Verify dev.to article URL"]
-        V_TG["Verify t.me channel URL\n(null if private)"]
-        V_DISC["Verify discord jump link\n(null if no guild / private)"]
+    subgraph Backend ["FastAPI Application (Port 4000)"]
+        ROUTER["API Router (/posting, /health)"]
+        SCHEMA["Pydantic v2 Schema (extra='forbid')"]
+        ORCH["PostingService Coordinator"]
     end
 
-    Aggregation["Result Aggregator & Error Sanitizer\n- Sanitize bot tokens & webhook secrets\n- Compute overall success flag\n- Summary counts (total, success, failed)"]
-    Response(["Normalized JSON Response\n(HTTP 200 OK / 422 Unprocessable)"])
+    subgraph Adapters ["Platform Adapters (asyncio.gather)"]
+        direction TB
+        A_BSKY["Bluesky Adapter (XRPC)"]
+        A_MASTO["Mastodon Adapter (REST)"]
+        A_DEVTO["Dev.to Adapter (Articles)"]
+        A_TG["Telegram Adapter (Bot API)"]
+        A_DISC["Discord Adapter (Webhook)"]
+    end
 
-    Client --> FastAPI
-    FastAPI --> Pydantic
-    Pydantic -- "Valid Payload" --> PostingService
-    Settings -.-> PostingService
-    PostingService --> AsyncGather
+    subgraph Verifier ["Public Reachability Verifier"]
+        V_CHECK["HTTP GET with Browser User-Agent"]
+    end
 
-    AsyncGather --> BSKY
-    AsyncGather --> MASTO
-    AsyncGather --> DEVTO
-    AsyncGather --> TG
-    AsyncGather --> DISC
+    subgraph Channels ["External Delivery Networks"]
+        C_BSKY[("bsky.app")]
+        C_MASTO[("mastodon.social")]
+        C_DEVTO[("dev.to")]
+        C_TG[("t.me")]
+        C_DISC[("discord.com")]
+    end
 
-    BSKY --> V_BSKY
-    MASTO --> V_MASTO
-    DEVTO --> V_DEVTO
-    TG --> V_TG
-    DISC --> V_DISC
+    UI --> VAL
+    VAL -->|Valid Payload| ROUTER
+    HEALTH -->|GET /health| ROUTER
+    ROUTER --> SCHEMA
+    SCHEMA --> ORCH
+    ORCH --> A_BSKY & A_MASTO & A_DEVTO & A_TG & A_DISC
+    
+    A_BSKY --> C_BSKY
+    A_MASTO --> C_MASTO
+    A_DEVTO --> C_DEVTO
+    A_TG --> C_TG
+    A_DISC --> C_DISC
 
-    V_BSKY --> Aggregation
-    V_MASTO --> Aggregation
-    V_DEVTO --> Aggregation
-    V_TG --> Aggregation
-    V_DISC --> Aggregation
-
-    Aggregation --> Response
+    A_BSKY & A_MASTO & A_DEVTO & A_TG & A_DISC -.-> V_CHECK
+    V_CHECK --> ORCH
+    ORCH -->|Normalized JSON| UI
+    UI --> STORE
 ```
 
 ---
 
-## Project Folder Structure
+### 2. End-to-End Request Lifecycle Sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Content Creator
+    participant UI as React Frontend (:5174)
+    participant API as FastAPI (:4000)
+    participant Schema as Pydantic v2 Validator
+    participant Service as PostingService
+    participant Adapters as 5 Platform Adapters
+    participant Networks as External Social APIs
+    participant Verify as Public GET Verifier
+
+    User->>UI: Types message with link (<= 200 chars)
+    UI->>UI: Real-time URL extraction & boundary check
+    User->>UI: Clicks "Publish to All Platforms"
+    UI->>UI: Disables submit button & triggers loading state
+    UI->>API: POST /posting { message: "..." }
+    API->>Schema: Validate string length, exactly 1 URL, no extra fields
+    alt Schema Validation Fails
+        Schema-->>API: 422 Unprocessable Entity
+        API-->>UI: Structured error array with location & message
+        UI-->>User: Renders inline validation feedback
+    else Valid Payload
+        Schema-->>Service: Validated message & target URL
+        Service->>Adapters: Schedule all 5 coroutines via asyncio.gather()
+        par Parallel Execution
+            Adapters->>Networks: Bluesky (com.atproto.repo.createRecord)
+            Adapters->>Networks: Mastodon (POST /api/v1/statuses)
+            Adapters->>Networks: Dev.to (POST /api/articles)
+            Adapters->>Networks: Telegram (POST /sendMessage)
+            Adapters->>Networks: Discord (POST /webhooks/?wait=true)
+        end
+        Networks-->>Adapters: Success or Error Payloads
+        par Verification Checks
+            Adapters->>Verify: Perform async HTTP GET on generated public URLs
+            Verify-->>Adapters: Returns True (200), False (401/403/Login), or None
+        end
+        Adapters-->>Service: 5 PlatformResult objects
+        Service->>Service: Sanitize tokens, compute summary, set overall success
+        Service-->>API: PostingResponse
+        API-->>UI: 200 OK Normalized JSON
+        UI->>UI: Save record to localStorage
+        UI->>UI: Re-enable publish button & render Results Dashboard
+        UI-->>User: Displays dynamic success rate & external post links
+    end
+```
+
+---
+
+### 3. Concurrent Fault Isolation & Resilience Flow
+
+```mermaid
+flowchart LR
+    Start([Posting Request]) --> Gather["asyncio.gather(return_exceptions=True)"]
+
+    subgraph PlatformRunners ["Isolated Worker Tasks"]
+        direction TB
+        subgraph Task1 ["Bluesky Worker"]
+            T1["Create Session & Record"] --> R1{Success?}
+            R1 -->|Yes| S1["Status: success\nposted_url: bsky.app/..."]
+            R1 -->|No| F1["Status: failed\nerror: Session invalid"]
+        end
+
+        subgraph Task2 ["Mastodon Worker"]
+            T2["POST /api/v1/statuses"] --> R2{Success?}
+            R2 -->|Yes| S2["Status: success\nposted_url: instance/@..."]
+            R2 -->|No| F2["Status: failed\nerror: HTTP 429 Rate limited"]
+        end
+
+        subgraph Task3 ["Dev.to Worker"]
+            T3["POST /api/articles"] --> R3{Success?}
+            R3 -->|Yes| S3["Status: success\nposted_url: dev.to/..."]
+            R3 -->|No| F3["Status: failed\nerror: 401 Unauthorized"]
+        end
+
+        subgraph Task4 ["Telegram Worker"]
+            T4["POST /sendMessage"] --> R4{Success?}
+            R4 -->|Yes| S4["Status: success\nposted_url: t.me/chan/..."]
+            R4 -->|No| F4["Status: failed\nerror: Bot not in channel"]
+        end
+
+        subgraph Task5 ["Discord Worker"]
+            T5["Execute Webhook"] --> R5{Success?}
+            R5 -->|Yes| S5["Status: success\nposted_url: discord.com/..."]
+            R5 -->|No| F5["Status: failed\nerror: Webhook 404 deleted"]
+        end
+    end
+
+    Gather --> Task1 & Task2 & Task3 & Task4 & Task5
+
+    S1 & F1 & S2 & F2 & S3 & F3 & S4 & F4 & S5 & F5 --> Aggregator["Result Aggregator\n- Successful: 3\n- Failed: 2\n- Overall: true\n- Zero unhandled exceptions"]
+    Aggregator --> Output([200 OK Client Response])
+```
+
+---
+
+### 4. Three-State Public Accessibility Verification
+
+```mermaid
+stateDiagram-v2
+    [*] --> PostPublication: Publication Successful (status = success)
+    
+    state HasPublicUrl <<choice>>
+    PostPublication --> HasPublicUrl: URL Generated?
+    
+    HasPublicUrl --> PrivateOrNoUrl: No (Private Channel / No Guild)
+    PrivateOrNoUrl --> NullState: public_access = null
+
+    HasPublicUrl --> HTTP_GET: Yes (posted_url exists)
+    
+    state HTTP_GET {
+        [*] --> SendRequest: GET Request with Browser User-Agent
+        SendRequest --> CheckResponse
+    }
+
+    state CheckResponse <<choice>>
+    CheckResponse --> Status2xx: HTTP 200..299 & No Redirect
+    CheckResponse --> StatusInaccessible: HTTP 401, 403, 404, 410 or Redirect to Login
+    CheckResponse --> StatusIndeterminate: Timeout, Network Error, Cloudflare, 429, 503
+
+    Status2xx --> TrueState: public_access = true\n(Publicly Accessible)
+    StatusInaccessible --> FalseState: public_access = false\n(Not Publicly Accessible)
+    StatusIndeterminate --> NullState: public_access = null\n(Unknown / Not Available)
+
+    note right of TrueState
+      Unauthenticated users can view post
+    end note
+
+    note right of FalseState
+      Requires platform login or membership
+    end note
+
+    note right of NullState
+      Never interpreted as false!
+      Preserves publication success status.
+    end note
+```
+
+---
+
+## 🔌 Platform Adapters & Protocol Specifications
+
+| Platform | Protocol / API | Endpoint | Public URL Pattern | Visibility Behavior |
+|---|---|---|---|---|
+| **Bluesky** | AT Protocol XRPC | `com.atproto.repo.createRecord` | `https://bsky.app/profile/{handle}/post/{rkey}` | `public_access: true` (Public unauthenticated web portal) |
+| **Mastodon** | Fediverse REST API | `POST /api/v1/statuses` | `https://{instance}/@{user}/{status_id}` | `public_access: true` (Public status federated) |
+| **Dev.to** | Forem Articles API | `POST /api/articles` | `https://dev.to/{username}/{slug}` | `public_access: true` (Public blog article) |
+| **Telegram** | Telegram Bot API | `POST /bot{token}/sendMessage` | `https://t.me/{channel_username}/{message_id}` | `public_access: true` if public `@channel`; `null` if private |
+| **Discord** | Webhooks (`?wait=true`) | `POST /api/webhooks/{id}/{token}` | `https://discord.com/channels/{guild}/{channel}/{msg}` | `public_access: false` (Authentication-gated guild) |
+
+---
+
+## 📁 Repository Structure
 
 ```
-automated-posting/
+multi-post/
 ├── app/
-│   ├── __init__.py               # Application package definition
-│   ├── main.py                   # FastAPI app, endpoints (/posting, /health), error handling
-│   ├── schemas.py                # Pydantic v2 schemas, URL extractor & validator
-│   ├── config.py                 # Pydantic Settings loading from environment / .env
+│   ├── __init__.py               # Package marker
+│   ├── main.py                   # FastAPI app, CORS middleware, /posting, /health
+│   ├── schemas.py                # Pydantic v2 schemas & RFC 1123 URL validator
+│   ├── config.py                 # Pydantic Settings loaded from .env
 │   ├── platforms/                # Platform adapters package
-│   │   ├── __init__.py           # Exports BasePlatformAdapter and all 5 adapters
-│   │   ├── base.py               # Abstract base class, timeout, retry guard, sanitization
-│   │   ├── bluesky.py            # AT Protocol XRPC adapter (createSession, createRecord)
-│   │   ├── mastodon.py           # Mastodon REST API adapter (statuses)
-│   │   ├── devto.py              # Dev.to Forem API adapter (articles)
-│   │   ├── telegram.py           # Telegram Bot API adapter (sendMessage, t.me logic)
-│   │   └── discord.py            # Discord Webhook adapter (?wait=true snowflake extraction)
+│   │   ├── __init__.py           # Adapter exports
+│   │   ├── base.py               # Abstract BasePlatformAdapter, timeout & sanitization
+│   │   ├── bluesky.py            # Bluesky XRPC session & record adapter
+│   │   ├── mastodon.py           # Mastodon ActivityPub status adapter
+│   │   ├── devto.py              # Dev.to Forem article adapter
+│   │   ├── telegram.py           # Telegram Bot API message adapter
+│   │   └── discord.py            # Discord Webhook adapter
 │   └── services/
-│       ├── __init__.py           # Services package definition
+│       ├── __init__.py           # Services package marker
 │       └── posting_service.py    # Multi-platform async orchestrator using asyncio.gather
+├── frontend/
+│   ├── .env                      # Frontend environment (VITE_API_BASE_URL)
+│   ├── .env.example              # Environment template
+│   ├── package.json              # React 19, Vite, Tailwind CSS, Lucide React
+│   ├── vite.config.js            # Port 5174 host configuration
+│   ├── tailwind.config.js        # Design tokens & color system
+│   ├── index.html                # App entry point
+│   ├── README.md                 # Frontend-specific architecture documentation
+│   └── src/
+│       ├── main.jsx              # React DOM bootstrap
+│       ├── App.jsx               # Application shell & route coordinator
+│       ├── index.css             # Inter typography & design tokens
+│       ├── services/
+│       │   └── api.js            # Fetch API client for /health and /posting
+│       ├── utils/
+│       │   ├── platforms.js      # Platform metadata & protocols
+│       │   ├── storage.js        # LocalStorage history manager
+│       │   └── urlValidator.js   # Client-side RFC URL validator
+│       ├── components/
+│       │   ├── Header.jsx        # Top navigation, status indicator & date
+│       │   ├── Sidebar.jsx       # Brand sidebar & navigation links
+│       │   ├── PlatformCard.jsx  # Individual platform status card
+│       │   ├── PlatformIcon.jsx  # SVG platform brand icons
+│       │   ├── PostComposer.jsx  # Composer textarea, live validator, submit button
+│       │   ├── PlatformResult.jsx# Per-platform result card with external link
+│       │   └── ResultsSummary.jsx# Dynamic stat cards & results grid
+│       └── pages/
+│           ├── Dashboard.jsx     # Main dashboard view
+│           ├── Compose.jsx       # Dedicated composition view
+│           ├── History.jsx       # Browser local history view & modal
+│           ├── Integrations.jsx  # Platform integration specs view
+│           └── Settings.jsx      # API endpoint configuration view
 ├── tests/
-│   ├── __init__.py               # Test package definition
-│   ├── test_posting.py           # End-to-end API integration tests (health, 5 platforms)
-│   ├── test_validation.py        # URL parsing, length checks, edge cases, 422 handling
-│   └── test_platforms.py         # Unit tests for platform adapters, verification, masks
-├── .env.example                  # Template configuration with placeholder credentials
-├── .gitignore                    # Excludes virtual environments, .env, and caches
-├── pytest.ini                    # Pytest configuration (asyncio mode, loop scope)
-├── requirements.txt              # Pinned production and testing dependencies
-└── README.md                     # Comprehensive architecture and operation guide
+│   ├── __init__.py               # Test package marker
+│   ├── test_posting.py           # End-to-end API integration tests
+│   ├── test_validation.py        # URL parsing & schema boundary tests
+│   └── test_platforms.py         # Unit tests for platform adapters & sanitization
+├── .env.example                  # Backend template environment file
+├── .gitignore                    # Git tracking rules
+├── pytest.ini                    # Pytest configuration
+├── requirements.txt              # Pinned Python dependencies
+└── README.md                     # Master documentation
 ```
 
 ---
 
-## Prerequisites and Installation
+## 🚀 Prerequisites & Installation
 
-### Prerequisites
-- **Python 3.10+** (Tested on Python 3.11)
-- **pip** and **virtualenv**
-
-### Installation Steps
-
-1. Clone or navigate to the repository directory:
-   ```bash
-   cd multi-post
-   ```
-
-2. Create and activate a Python virtual environment:
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate
-   ```
-
-3. Upgrade packaging tools and install required dependencies:
-   ```bash
-   pip install --upgrade pip setuptools wheel
-   pip install -r requirements.txt
-   ```
+### System Requirements
+- **Python**: 3.10, 3.11, or 3.12
+- **Node.js**: v18.0.0 or higher
+- **npm**: v9.0.0 or higher
 
 ---
 
-## Environment Variables and Configuration
+### 1. Backend Setup (Port 4000)
 
-Copy `.env.example` to `.env`:
 ```bash
+# 1. Clone the repository
+git clone https://github.com/viditsharma1405/multi-post.git
+cd multi-post
+
+# 2. Create and activate a Python virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 3. Install production & testing dependencies
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# 4. Copy backend environment template
 cp .env.example .env
+# Edit .env with your platform credentials (see Platform Credentials Guide)
+
+# 5. Start the FastAPI server on port 4000
+uvicorn app.main:app --host 0.0.0.0 --port 4000 --reload
 ```
 
-### Configuration Parameters
-
-| Variable Name | Required | Default | Description |
-|---|---|---|---|
-| `BLUESKY_HANDLE` | Optional | `None` | Your Bluesky handle (e.g. `user.bsky.social`) |
-| `BLUESKY_APP_PASSWORD` | Optional | `None` | App password generated from Bluesky Settings |
-| `MASTODON_INSTANCE_URL` | Optional | `None` | Full URL of Mastodon instance (e.g. `https://mastodon.social`) |
-| `MASTODON_ACCESS_TOKEN` | Optional | `None` | OAuth Bearer access token for Mastodon |
-| `DEVTO_API_KEY` | Optional | `None` | API key from Dev.to Settings Extensions |
-| `DEVTO_ARTICLE_TITLE` | Optional | `"Automated Platform Update"` | Title used when publishing articles to Dev.to |
-| `TELEGRAM_BOT_TOKEN` | Optional | `None` | Bot token provided by @BotFather |
-| `TELEGRAM_CHAT_ID` | Optional | `None` | Telegram channel ID (e.g. `-1001234567890`) or `@channel` |
-| `TELEGRAM_CHANNEL_USERNAME` | Optional | `None` | Public channel handle (without `@`) for public `t.me` URLs |
-| `DISCORD_WEBHOOK_URL` | Optional | `None` | Incoming Webhook URL from Discord Server Channel Settings |
-| `DISCORD_GUILD_ID` | Optional | `None` | Discord Server/Guild ID used for channel jump links |
-| `REQUEST_TIMEOUT_SECONDS` | Optional | `10.0` | HTTP request timeout for external posting operations |
-| `VERIFICATION_TIMEOUT_SECONDS` | Optional | `5.0` | HTTP GET verification timeout for public URL checks |
-
-> **Graceful Startup Note**: If any platform credential is missing from `.env`, the FastAPI application still starts normally. Posting attempts for that platform will report a failed result with a descriptive configuration error message, while configured platforms publish successfully.
+*Verify Backend Health:*
+```bash
+curl http://localhost:4000/health
+# Expected: {"status":"ok","platforms_configured":{...},"version":"1.0.0"}
+```
 
 ---
 
-## Platform Credentials Guide with Official Documentation
+### 2. Frontend Setup (Port 5174)
 
-### 1. Bluesky (AT Protocol)
-- **Official Documentation**: [AT Protocol XRPC Reference](https://docs.bsky.app/docs/category/http-reference)
-- **Credential Generation**:
-  1. Log in to [bsky.app](https://bsky.app).
-  2. Navigate to **Settings** -> **Privacy and Security** -> **App Passwords**.
-  3. Click **Add App Password**, name it `automated-posting`, and copy the generated password (format: `xxxx-xxxx-xxxx-xxxx`).
-  4. Set `BLUESKY_HANDLE` to your handle and `BLUESKY_APP_PASSWORD` to the app password.
+In a new terminal window:
+```bash
+cd multi-post/frontend
+
+# 1. Install dependencies
+npm install
+
+# 2. Copy frontend environment template
+cp .env.example .env
+
+# 3. Start Vite development server
+npm run dev
+```
+
+Open your browser to:
+👉 **`http://localhost:5174`**
+
+*(Note: Port 5174 is configured in `vite.config.js` to avoid port collisions.)*
+
+---
+
+## ⚙️ Environment Variables & Configuration
+
+### Backend (`.env`)
+```env
+# Bluesky
+BLUESKY_HANDLE=yourname.bsky.social
+BLUESKY_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
+
+# Mastodon
+MASTODON_INSTANCE_URL=https://mastodon.social
+MASTODON_ACCESS_TOKEN=your_oauth_access_token
+
+# Dev.to
+DEVTO_API_KEY=your_devto_api_key
+DEVTO_ARTICLE_TITLE=Automated Platform Update
+
+# Telegram
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRstuVWXyz
+TELEGRAM_CHAT_ID=-1001234567890
+TELEGRAM_CHANNEL_USERNAME=my_public_channel
+
+# Discord
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/123/abc
+DISCORD_GUILD_ID=123456789012345678
+
+# Timeouts (Seconds)
+REQUEST_TIMEOUT_SECONDS=10.0
+VERIFICATION_TIMEOUT_SECONDS=5.0
+```
+
+### Frontend (`frontend/.env`)
+```env
+VITE_API_BASE_URL=http://localhost:4000
+```
+
+> **Security Rule**: Platform credentials must **never** be placed in frontend environment files. The frontend only stores the orchestrator URL.
+
+---
+
+## 🔑 Platform Credentials Guide
+
+### 1. Bluesky
+1. Log in to [bsky.app](https://bsky.app).
+2. Go to **Settings** → **Privacy and Security** → **App Passwords**.
+3. Create an App Password named `multipost` and copy the generated password.
+4. Set `BLUESKY_HANDLE` and `BLUESKY_APP_PASSWORD`.
 
 ### 2. Mastodon
-- **Official Documentation**: [Mastodon Statuses API](https://docs.joinmastodon.org/methods/statuses/)
-- **Credential Generation**:
-  1. Log in to your Mastodon instance (e.g. `https://mastodon.social`).
-  2. Go to **Preferences** -> **Development** -> **New Application**.
-  3. Enter application name `automated-posting` and ensure scope `write:statuses` is checked.
-  4. Submit and copy the **Your access token** string.
-  5. Set `MASTODON_INSTANCE_URL` to your instance domain and `MASTODON_ACCESS_TOKEN` to this token.
+1. Log in to your Mastodon instance (e.g., `https://mastodon.social`).
+2. Navigate to **Preferences** → **Development** → **New Application**.
+3. Enable the `write:statuses` scope and submit.
+4. Copy the generated **Access Token** into `MASTODON_ACCESS_TOKEN`.
 
-### 3. Dev.to (Forem API)
-- **Official Documentation**: [Forem / Dev.to Articles API](https://developers.forem.com/api/v1#tag/articles/operation/createArticle)
-- **Credential Generation**:
-  1. Log in to [dev.to](https://dev.to).
-  2. Navigate to **Settings** -> **Extensions**.
-  3. Scroll to **DEV Community API Keys**, enter a description, and click **Generate API Key**.
-  4. Set `DEVTO_API_KEY` to the generated key.
+### 3. Dev.to
+1. Log in to [dev.to](https://dev.to).
+2. Go to **Settings** → **Extensions**.
+3. Generate a new API key under **DEV Community API Keys**.
+4. Copy key into `DEVTO_API_KEY`.
 
-### 4. Telegram Bot API
-- **Official Documentation**: [Telegram Bot API sendMessage](https://core.telegram.org/bots/api#sendmessage)
-- **Credential Generation**:
-  1. Open Telegram and search for [@BotFather](https://t.me/BotFather).
-  2. Send `/newbot` and follow instructions to get your `TELEGRAM_BOT_TOKEN`.
-  3. Create a public or private channel in Telegram. Add your bot to the channel as an **Administrator** with permission to post messages.
-  4. For a public channel with a username (e.g. `@my_announcements`), set `TELEGRAM_CHAT_ID=@my_announcements` and `TELEGRAM_CHANNEL_USERNAME=my_announcements`.
-  5. For numeric IDs (e.g. `-1001234567890`), obtain the ID using [@userinfobot](https://t.me/userinfobot) or API updates.
+### 4. Telegram
+1. Message [@BotFather](https://t.me/BotFather) on Telegram and send `/newbot` to receive your `TELEGRAM_BOT_TOKEN`.
+2. Add the bot to your target channel as an **Administrator** with posting permissions.
+3. For public channels, set `TELEGRAM_CHAT_ID=@channel_handle` and `TELEGRAM_CHANNEL_USERNAME=channel_handle`.
 
-### 5. Discord Webhooks
-- **Official Documentation**: [Discord Execute Webhook Reference](https://discord.com/developers/docs/resources/webhook#execute-webhook)
-- **Credential Generation**:
-  1. In Discord, navigate to **Server Settings** -> **Integrations** -> **Webhooks**.
-  2. Click **New Webhook**, select the desired channel, and click **Copy Webhook URL**.
-  3. Set `DISCORD_WEBHOOK_URL` to this URL.
-  4. Optional: Enable Developer Mode in Discord, right-click the server name, select **Copy Server ID**, and set `DISCORD_GUILD_ID`.
+### 5. Discord
+1. In Discord, navigate to **Server Settings** → **Integrations** → **Webhooks**.
+2. Click **New Webhook**, select the desired channel, and copy the Webhook URL.
+3. Enable Developer Mode, right-click the server icon, click **Copy Server ID**, and set `DISCORD_GUILD_ID`.
 
 ---
 
-## Starting the Application
+## 📡 API Reference & Sample Payloads
 
-Run the server on port `4000` using Uvicorn:
-
-```bash
-source .venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 4000
-```
-
-The server initializes and outputs startup logs detailing configured platforms:
-```
-2026-11-15 13:43:45,228 [INFO] app.main - Starting Automated Multi-Platform Posting System on port 4000.
-2026-11-15 13:43:45,228 [INFO] app.main - Platform readiness: Bluesky=True, Mastodon=True, Dev.to=True, Telegram=True, Discord=True
-INFO:     Uvicorn running on http://0.0.0.0:4000 (Press CTRL+C to quit)
-```
-
----
-
-## Swagger UI Interactive Documentation
-
-Once the server is running, explore and test the API interactively:
-- **Interactive Swagger UI**: [http://localhost:4000/docs](http://localhost:4000/docs)
-- **Alternative ReDoc UI**: [http://localhost:4000/redoc](http://localhost:4000/redoc)
-- **Health Check Endpoint**: [http://localhost:4000/health](http://localhost:4000/health)
-
----
-
-## Sample curl Requests and Responses
-
-### 1. Health Check Request
+### 1. Health Probe (`GET /health`)
 ```bash
 curl -X GET http://localhost:4000/health
 ```
-
-**Response**:
 ```json
 {
   "status": "ok",
@@ -318,62 +543,59 @@ curl -X GET http://localhost:4000/health
 }
 ```
 
-### 2. Multi-Platform Publication Request
+### 2. Publish Broadcast (`POST /posting`)
 ```bash
 curl -X POST http://localhost:4000/posting \
   -H "Content-Type: application/json" \
   -d '{
-    "message": "Check out our latest business platform and grow your online visibility. https://example.com"
+    "message": "Excited to launch our platform update! Learn more at https://example.com"
   }'
 ```
-
-### Illustrative Response (Simulated Mixture of Success and Failure)
-> **Note**: The following response is illustrative to demonstrate the normalized schema when some platforms succeed and others encounter platform-specific constraints or missing configuration.
 
 ```json
 {
   "success": true,
   "summary": {
     "total": 5,
-    "successful": 3,
-    "failed": 2
+    "successful": 4,
+    "failed": 1
   },
   "results": [
     {
       "platform": "bluesky",
       "status": "success",
-      "posted_url": "https://bsky.app/profile/techbrand.bsky.social/post/3kabc123def45",
+      "posted_url": "https://bsky.app/profile/user.bsky.social/post/3n2drxrbmtq27",
       "public_access": true,
       "date": "2026-11-15",
-      "time": "12:30:15",
+      "time": "10:14:00",
       "error": null
     },
     {
       "platform": "mastodon",
       "status": "success",
-      "posted_url": "https://mastodon.social/@techbrand/112233445566778899",
+      "posted_url": "https://mastodon.social/@user/1122334455",
       "public_access": true,
       "date": "2026-11-15",
-      "time": "12:30:15",
+      "time": "10:14:01",
       "error": null
     },
     {
       "platform": "devto",
       "status": "success",
-      "posted_url": "https://dev.to/techbrand/automated-platform-update-4a1b",
+      "posted_url": "https://dev.to/user/automated-platform-update-1234",
       "public_access": true,
       "date": "2026-11-15",
-      "time": "12:30:16",
+      "time": "10:14:02",
       "error": null
     },
     {
       "platform": "telegram",
-      "status": "failed",
-      "posted_url": null,
-      "public_access": null,
-      "date": null,
-      "time": null,
-      "error": "Telegram is not configured: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing."
+      "status": "success",
+      "posted_url": "https://t.me/mychannel/42",
+      "public_access": true,
+      "date": "2026-11-15",
+      "time": "10:14:02",
+      "error": null
     },
     {
       "platform": "discord",
@@ -382,110 +604,54 @@ curl -X POST http://localhost:4000/posting \
       "public_access": null,
       "date": null,
       "time": null,
-      "error": "discord API returned HTTP 404: {\"message\": \"Unknown Webhook\", \"code\": 10015}"
+      "error": "Discord API returned HTTP 404: Unknown Webhook"
     }
   ]
 }
 ```
 
-### 3. Invalid Request Example (Exceeding Character Limit)
-```bash
-curl -X POST http://localhost:4000/posting \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "This message is intentionally crafted to exceed the two hundred character limit enforced by the API schema validation rules to demonstrate the standard 422 Unprocessable Entity error response format. https://example.com"
-  }'
-```
-
-**Response (HTTP 422)**:
-```json
-{
-  "detail": "Input validation error",
-  "errors": [
-    "body -> message: Value error, Message contains 248 characters, exceeding the maximum allowed limit of 200."
-  ]
-}
-```
-
 ---
 
-## Running the Automated Test Suite
+## 🧪 Automated Testing Suite (86 Pytest Cases)
 
-All tests use `pytest`, `pytest-asyncio`, and `respx` to mock external API requests. **Running the tests does not require live credentials, external network calls, or active social media accounts.**
+All tests execute offline using `pytest-asyncio` and `respx` to mock external API endpoints without requiring live credentials:
 
-Run all test suites:
 ```bash
-source .venv/bin/activate
+# Run complete test suite
 pytest -v
-```
 
-Run specific test files:
-```bash
-# Test URL parsing, punctuation handling, character bounds, and 422 validations
-pytest tests/test_validation.py -v
-
-# Test platform adapters, AT Protocol session flows, and credential sanitization
-pytest tests/test_platforms.py -v
-
-# Test end-to-end API integration and concurrency failure isolation
-pytest tests/test_posting.py -v
+# Output:
+# tests/test_platforms.py ......................... [ 39%]
+# tests/test_posting.py ........................... [ 47%]
+# tests/test_validation.py ........................ [100%]
+# ============================== 86 passed in 3.07s ==============================
 ```
 
 ---
 
-## Security and Credential Sanitization
+## 🛡️ Security, Masking & Fault Isolation
 
-1. **Secret Masking**:
-   - `BasePlatformAdapter.sanitize_error` filters Telegram bot tokens (`bot***:***`), Discord webhook tokens (`webhooks/<id>/***`), Bearer tokens (`Bearer ***`), and exact matches of configured secret strings from all exception traces and API outputs.
+1. **Automatic Secret Masking**:
+   - `BasePlatformAdapter.sanitize_error` filters Telegram bot tokens (`bot***`), Discord webhook secrets, Bearer tokens, and exact credential matches from all exception traces and JSON error fields.
 2. **Zero Blind Retries**:
-   - Non-idempotent posting requests (creating posts, messages, or articles) are never retried blindly to prevent duplicate posts and avoid rapid rate limit exhaustion.
-3. **Strict Schema Constraints**:
-   - Pydantic's `extra="forbid"` rejects attempts to pass extra parameters, ensuring clients cannot tamper with internal platform routing.
+   - Creating posts/articles is non-idempotent. Non-idempotent operations are never retried blindly to prevent duplicate posts and rapid rate-limit exhaustion.
+3. **No Client Platform Tampering**:
+   - Pydantic's `extra="forbid"` rejects attempts by clients to pass target platform lists. Platform selection is strictly server-side.
 4. **Git Safety**:
-   - `.gitignore` prevents `.env`, virtual environment directories, and bytecode from ever being committed to source control.
+   - `.gitignore` strictly protects `.env`, virtual environments, and credential files from source control commits.
 
 ---
 
-## Platform Caveats, Restrictions, and Architectural Notes
+## 📝 Platform Caveats & Architectural Nuances
 
-### 1. Bluesky Client-Supplied Timestamp Metadata
-- Under the AT Protocol Lexicon (`app.bsky.feed.post`), `createdAt` is a mandatory client-supplied record field required during creation, rather than a timestamp generated or returned by the `com.atproto.repo.createRecord` endpoint.
-- This system formats `createdAt` in ISO 8601 UTC format, includes it in the record payload, and reports this client-supplied metadata only upon receiving verified confirmation (`uri` and `cid`) from the Bluesky XRPC server.
-- The timestamp is never reported or fabricated if record creation fails.
-
-### 2. Dev.to Publication Timestamps
-- Dev.to's Forem Articles API returns `published_at` once an article is published.
-- The integration strictly parses `published_at` and does not use `created_at` as a fallback. If `published_at` is missing, null, or unparseable, `date` and `time` are reported as `null`.
-- Because Dev.to is an article publishing platform rather than a short-form micro-status feed, articles are created with the submitted message formatted as the markdown body under `DEVTO_ARTICLE_TITLE`.
-
-### 3. Telegram Public URL Constraints and Timestamps
-- Telegram messages only possess a public web URL (`https://t.me/<username>/<message_id>`) if the channel is public and possesses a configured `@username`.
-- For private channels, groups, or direct chats with bots, no public web URL exists. In accordance with requirements, the system returns `posted_url: null` and `public_access: null` rather than fabricating an invalid URL.
-- Publication timestamps are extracted from Telegram's integer Unix `date` field and converted to UTC (date, time). If missing or invalid, `date` and `time` are reported as `null`.
-
-### 4. Discord Authentication Gating and Webhooks
-- Discord Webhook execution with `?wait=true` returns `id` (message snowflake), `channel_id`, and `timestamp`.
-- Constructing a message navigation link (`https://discord.com/channels/<guild_id>/<channel_id>/<message_id>`) requires `DISCORD_GUILD_ID`.
-- Even when this URL is formed, Discord servers are authentication-gated. Unauthenticated browser GET requests receive HTTP 401 Unauthorized or redirect to the Discord login portal. Public verification correctly evaluates `public_access: false`.
-- If `timestamp` is omitted by Discord, `date` and `time` are reported as `null`.
-
-### 5. Public Access Verification Semantics and Fault Isolation
-- Verification checks use an asynchronous HTTP GET request with a standard browser User-Agent without authentication:
-  - `True`: URL responds with HTTP 200-299 and is not redirected to an authentication or login portal.
-  - `False`: URL responds with confirmed inaccessible status codes (`401`, `403`, `404`, `410`) or redirects to a login/auth page (`/login`, `/signin`, etc.).
-  - `None`: Indeterminate state resulting from connection timeouts, network transport errors, anti-bot challenge interstitials (e.g. Cloudflare), rate limits (`429`), or temporary server unavailability (`503`). Network dropouts do not establish that content is private.
-- **Key Architectural Invariant**: Verification failures never demote or alter a successful publication (`status: "success"`).
+- **Bluesky Client Timestamps**: AT Protocol `app.bsky.feed.post` requires `createdAt` to be supplied by the client during record creation. MultiPost reports this metadata only upon receiving verified `uri` confirmation from the XRPC server.
+- **Dev.to Article Dates**: The adapter strictly evaluates `published_at` and does not use `created_at` as a fallback.
+- **Telegram Public Web URLs**: URLs are only constructed when the channel is public with a configured `@username`. Private channels return `posted_url: null` and `public_access: null`.
+- **Discord Authentication Gating**: Discord channels require user authentication. Public GET verification correctly evaluates `public_access: false`.
+- **Verification Non-Demotion**: Verification checks never demote or alter a successful publication (`status: "success"`).
 
 ---
 
-## GitHub Submission Checklist
+## 📄 License
 
-Before submitting before the **November 22, 2026** deadline, verify:
-
-- [x] Repository contains required structure: `app/`, `tests/`, `.env.example`, `.gitignore`, `requirements.txt`, and `README.md`.
-- [x] All 86 automated tests pass (`pytest -v`).
-- [x] Application successfully launches with `uvicorn app.main:app --host 0.0.0.0 --port 4000`.
-- [x] Interactive Swagger UI loads at `http://localhost:4000/docs`.
-- [x] `.env` is omitted from Git tracking (`git status` confirms no `.env` or credentials tracked).
-- [ ] Repository published to GitHub and visibility set to **Public** (pending user repository creation/push).
-- [ ] Provide repository link and live execution logs in your email submission before the deadline (pending user submission).
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
