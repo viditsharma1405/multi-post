@@ -30,7 +30,7 @@ class DiscordAdapter(BasePlatformAdapter):
         return "discord"
 
     def is_configured(self) -> bool:
-        return bool(self.settings.discord_webhook_url)
+        return self.settings.is_discord_configured
 
     def get_configuration_error(self) -> str:
         return "Discord is not configured: DISCORD_WEBHOOK_URL is missing."

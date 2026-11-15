@@ -16,7 +16,7 @@ class MastodonAdapter(BasePlatformAdapter):
         return "mastodon"
 
     def is_configured(self) -> bool:
-        return bool(self.settings.mastodon_instance_url and self.settings.mastodon_access_token)
+        return self.settings.is_mastodon_configured
 
     def get_configuration_error(self) -> str:
         return (

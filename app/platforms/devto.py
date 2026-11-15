@@ -25,7 +25,7 @@ class DevtoAdapter(BasePlatformAdapter):
         return "devto"
 
     def is_configured(self) -> bool:
-        return bool(self.settings.devto_api_key)
+        return self.settings.is_devto_configured
 
     def get_configuration_error(self) -> str:
         return "Dev.to is not configured: DEVTO_API_KEY is missing."

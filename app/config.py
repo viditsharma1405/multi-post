@@ -38,32 +38,54 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        str_strip_whitespace=True,
     )
+
+    @staticmethod
+    def _is_valid_credential(val: Optional[str]) -> bool:
+        """Check if a credential value is populated and not an unedited template placeholder."""
+        if not val or not isinstance(val, str):
+            return False
+        clean = val.strip()
+        return bool(clean and not clean.startswith("YOUR_"))
 
     @property
     def is_bluesky_configured(self) -> bool:
         """Check if Bluesky has the required configuration parameters."""
-        return bool(self.bluesky_handle and self.bluesky_app_password)
+        return bool(
+            self._is_valid_credential(self.bluesky_handle)
+            and self._is_valid_credential(self.bluesky_app_password)
+        )
 
     @property
     def is_mastodon_configured(self) -> bool:
         """Check if Mastodon has the required configuration parameters."""
-        return bool(self.mastodon_instance_url and self.mastodon_access_token)
+        return bool(
+            self._is_valid_credential(self.mastodon_instance_url)
+            and self._is_valid_credential(self.mastodon_access_token)
+        )
 
     @property
     def is_devto_configured(self) -> bool:
         """Check if Dev.to has the required configuration parameters."""
-        return bool(self.devto_api_key)
+        return bool(self._is_valid_credential(self.devto_api_key))
 
     @property
     def is_telegram_configured(self) -> bool:
         """Check if Telegram has the required configuration parameters."""
-        return bool(self.telegram_bot_token and self.telegram_chat_id)
+        return bool(
+            self._is_valid_credential(self.telegram_bot_token)
+            and self._is_valid_credential(self.telegram_chat_id)
+        )
 
     @property
     def is_discord_configured(self) -> bool:
         """Check if Discord has the required configuration parameters."""
-        return bool(self.discord_webhook_url)
+        url = self.discord_webhook_url or ""
+        return bool(
+            self._is_valid_credential(self.discord_webhook_url)
+            and (url.startswith("http://") or url.startswith("https://"))
+        )
 
 
 @lru_cache()

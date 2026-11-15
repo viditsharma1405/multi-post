@@ -25,7 +25,7 @@ class BlueskyAdapter(BasePlatformAdapter):
         return "bluesky"
 
     def is_configured(self) -> bool:
-        return bool(self.settings.bluesky_handle and self.settings.bluesky_app_password)
+        return self.settings.is_bluesky_configured
 
     def get_configuration_error(self) -> str:
         return (
@@ -35,9 +35,11 @@ class BlueskyAdapter(BasePlatformAdapter):
     async def _publish_impl(self, message: str, client: httpx.AsyncClient) -> PlatformResult:
         """Authenticate via com.atproto.server.createSession and post to app.bsky.feed.post."""
         session_url = f"{self.BLUESKY_HOST}/xrpc/com.atproto.server.createSession"
+        clean_handle = (self.settings.bluesky_handle or "").lstrip("@").strip()
+        clean_password = (self.settings.bluesky_app_password or "").strip()
         session_payload = {
-            "identifier": self.settings.bluesky_handle,
-            "password": self.settings.bluesky_app_password,
+            "identifier": clean_handle,
+            "password": clean_password,
         }
 
         # Step 1: Create session / authenticate

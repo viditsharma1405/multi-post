@@ -18,7 +18,7 @@ class TelegramAdapter(BasePlatformAdapter):
         return "telegram"
 
     def is_configured(self) -> bool:
-        return bool(self.settings.telegram_bot_token and self.settings.telegram_chat_id)
+        return self.settings.is_telegram_configured
 
     def get_configuration_error(self) -> str:
         return (

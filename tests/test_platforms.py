@@ -36,7 +36,7 @@ class TestBlueskyAdapter:
     """Tests for Bluesky AT Protocol adapter."""
 
     def test_unconfigured(self):
-        adapter = BlueskyAdapter(Settings())
+        adapter = BlueskyAdapter(Settings(_env_file=None))
         assert not adapter.is_configured()
         assert "BLUESKY_HANDLE or BLUESKY_APP_PASSWORD is missing" in adapter.get_configuration_error()
 
@@ -136,7 +136,7 @@ class TestMastodonAdapter:
     """Tests for Mastodon REST API adapter."""
 
     def test_unconfigured(self):
-        adapter = MastodonAdapter(Settings())
+        adapter = MastodonAdapter(Settings(_env_file=None))
         assert not adapter.is_configured()
         assert "MASTODON_INSTANCE_URL or MASTODON_ACCESS_TOKEN is missing" in adapter.get_configuration_error()
 
@@ -214,7 +214,7 @@ class TestDevtoAdapter:
     """Tests for Dev.to Forem API adapter."""
 
     def test_unconfigured(self):
-        adapter = DevtoAdapter(Settings())
+        adapter = DevtoAdapter(Settings(_env_file=None))
         assert not adapter.is_configured()
         assert "DEVTO_API_KEY is missing" in adapter.get_configuration_error()
 
@@ -339,7 +339,7 @@ class TestTelegramAdapter:
     """Tests for Telegram Bot API adapter."""
 
     def test_unconfigured(self):
-        adapter = TelegramAdapter(Settings())
+        adapter = TelegramAdapter(Settings(_env_file=None))
         assert not adapter.is_configured()
         assert "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing" in adapter.get_configuration_error()
 
@@ -450,7 +450,7 @@ class TestDiscordAdapter:
     """Tests for Discord Webhook adapter."""
 
     def test_unconfigured(self):
-        adapter = DiscordAdapter(Settings())
+        adapter = DiscordAdapter(Settings(_env_file=None))
         assert not adapter.is_configured()
         assert "DISCORD_WEBHOOK_URL is missing" in adapter.get_configuration_error()
 
