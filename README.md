@@ -47,7 +47,7 @@ This system provides a single, unified endpoint `POST /posting` running on port 
 - **Public URL Verification**: Post-publication HTTP GET requests distinguish between successful submission and actual unauthenticated public availability. Verification failure does not demote publication success.
 - **Zero Startup Crashes on Missing Secrets**: Platform credentials default to `None` with graceful per-platform error reporting if environment variables are not supplied.
 - **Enterprise-Grade Sanitization**: Automatic masking of Telegram bot tokens, Discord webhook secrets, Bearer tokens, and sensitive keys from all logs and error messages.
-- **Comprehensive Test Coverage**: 65 automated pytest test cases validating schemas, URL extraction edge cases, mocked platform adapters (`respx`), and full API integration flows.
+- **Comprehensive Test Coverage**: 86 automated pytest test cases validating schemas, URL extraction edge cases, mocked platform adapters (`respx`), and full API integration flows.
 
 ---
 
@@ -57,7 +57,7 @@ This system provides a single, unified endpoint `POST /posting` running on port 
 2. **Schema & URL Validation**:
    - `PostingRequest` checks that `message` is non-empty after trimming and contains `<= 200` characters.
    - Extra fields (such as client-specified platform arrays) are rejected with HTTP 422 (`extra="forbid"`).
-   - `extract_and_validate_single_url` strips surrounding prose punctuation, validates that exactly one URL exists, ensures scheme is `http` or `https`, and verifies valid hostname syntax.
+   - `extract_and_validate_single_url` strips surrounding prose punctuation, validates that exactly one URL exists, ensures scheme is `http` or `https`, and verifies valid RFC 1123 hostname syntax.
 3. **Posting Service Orchestration**:
    - The `PostingService` initializes adapters for all five platforms (`Bluesky`, `Mastodon`, `Dev.to`, `Telegram`, `Discord`), injecting environment settings from `config.py`.
 4. **Concurrent Parallel Execution**:
@@ -68,7 +68,7 @@ This system provides a single, unified endpoint `POST /posting` running on port 
    - If the API succeeds, the adapter extracts the post identifier and constructs the platform URL.
 6. **Public URL Verification**:
    - For platforms where a public URL was generated, an asynchronous HTTP GET request is performed with a browser User-Agent.
-   - `public_access` is set to `True` (HTTP 200), `False` (HTTP 401/403/404 or timeout), or `None` (private platforms or ambiguous challenge).
+   - `public_access` is set to `True` (HTTP 200-299), `False` (confirmed inaccessible: HTTP 401/403/404/410 or redirect to login), or `None` (indeterminate: timeouts, network transport errors, Cloudflare challenge, HTTP 429/503, or platforms without public URLs).
 7. **Aggregation & Normalization**:
    - `PostingService` consolidates results into a normalized `PostingResponse` containing an overall `success` boolean (`True` if at least one platform succeeded, `False` if all failed), summary counts, and an array of five `PlatformResult` items.
 
@@ -448,22 +448,33 @@ pytest tests/test_posting.py -v
 
 ## Platform Caveats, Restrictions, and Architectural Notes
 
-### 1. Dev.to is an Article Publishing Platform
-- Unlike Bluesky or Mastodon, Dev.to does not provide a short-form micro-status endpoint.
-- This integration publishes a published article via `POST /api/articles` with the submitted message formatted as the markdown body under `DEVTO_ARTICLE_TITLE`.
+### 1. Bluesky Client-Supplied Timestamp Metadata
+- Under the AT Protocol Lexicon (`app.bsky.feed.post`), `createdAt` is a mandatory client-supplied record field required during creation, rather than a timestamp generated or returned by the `com.atproto.repo.createRecord` endpoint.
+- This system formats `createdAt` in ISO 8601 UTC format, includes it in the record payload, and reports this client-supplied metadata only upon receiving verified confirmation (`uri` and `cid`) from the Bluesky XRPC server.
+- The timestamp is never reported or fabricated if record creation fails.
 
-### 2. Telegram Public URL Constraints
-- Telegram messages only possess a public web URL (`https://t.me/<username>/<message_id>`) if the channel is public and possesses a public `@username`.
+### 2. Dev.to Publication Timestamps
+- Dev.to's Forem Articles API returns `published_at` once an article is published.
+- The integration strictly parses `published_at` and does not use `created_at` as a fallback. If `published_at` is missing, null, or unparseable, `date` and `time` are reported as `null`.
+- Because Dev.to is an article publishing platform rather than a short-form micro-status feed, articles are created with the submitted message formatted as the markdown body under `DEVTO_ARTICLE_TITLE`.
+
+### 3. Telegram Public URL Constraints and Timestamps
+- Telegram messages only possess a public web URL (`https://t.me/<username>/<message_id>`) if the channel is public and possesses a configured `@username`.
 - For private channels, groups, or direct chats with bots, no public web URL exists. In accordance with requirements, the system returns `posted_url: null` and `public_access: null` rather than fabricating an invalid URL.
+- Publication timestamps are extracted from Telegram's integer Unix `date` field and converted to UTC (date, time). If missing or invalid, `date` and `time` are reported as `null`.
 
-### 3. Discord Authentication Gating and Message Links
-- Discord Webhook execution returns `id` (message snowflake) and `channel_id`.
+### 4. Discord Authentication Gating and Webhooks
+- Discord Webhook execution with `?wait=true` returns `id` (message snowflake), `channel_id`, and `timestamp`.
 - Constructing a message navigation link (`https://discord.com/channels/<guild_id>/<channel_id>/<message_id>`) requires `DISCORD_GUILD_ID`.
-- Even when this URL is formed, Discord servers are authentication-gated. Unauthenticated browser GET requests receive HTTP 401 Unauthorized or redirect to the Discord login portal. Public verification correctly flags `public_access: false`.
+- Even when this URL is formed, Discord servers are authentication-gated. Unauthenticated browser GET requests receive HTTP 401 Unauthorized or redirect to the Discord login portal. Public verification correctly evaluates `public_access: false`.
+- If `timestamp` is omitted by Discord, `date` and `time` are reported as `null`.
 
-### 4. Public Access Verification vs. Publication Success
-- Verification checks use an HTTP GET request with a standard browser User-Agent to detect public accessibility without authentication.
-- **Key Invariant**: If an external platform experiences a temporary CDN glitch or bot challenge during GET verification, `public_access` may evaluate to `false` or `null`, but the publication status remains `status: "success"`.
+### 5. Public Access Verification Semantics and Fault Isolation
+- Verification checks use an asynchronous HTTP GET request with a standard browser User-Agent without authentication:
+  - `True`: URL responds with HTTP 200-299 and is not redirected to an authentication or login portal.
+  - `False`: URL responds with confirmed inaccessible status codes (`401`, `403`, `404`, `410`) or redirects to a login/auth page (`/login`, `/signin`, etc.).
+  - `None`: Indeterminate state resulting from connection timeouts, network transport errors, anti-bot challenge interstitials (e.g. Cloudflare), rate limits (`429`), or temporary server unavailability (`503`). Network dropouts do not establish that content is private.
+- **Key Architectural Invariant**: Verification failures never demote or alter a successful publication (`status: "success"`).
 
 ---
 
@@ -472,9 +483,9 @@ pytest tests/test_posting.py -v
 Before submitting before the **November 22, 2026** deadline, verify:
 
 - [x] Repository contains required structure: `app/`, `tests/`, `.env.example`, `.gitignore`, `requirements.txt`, and `README.md`.
-- [x] All 65 automated tests pass (`pytest -v`).
+- [x] All 86 automated tests pass (`pytest -v`).
 - [x] Application successfully launches with `uvicorn app.main:app --host 0.0.0.0 --port 4000`.
 - [x] Interactive Swagger UI loads at `http://localhost:4000/docs`.
 - [x] `.env` is omitted from Git tracking (`git status` confirms no `.env` or credentials tracked).
-- [x] Repository visibility is set to **Public** on GitHub.
-- [x] Provide repository link and live execution logs in your email submission before the deadline.
+- [ ] Repository published to GitHub and visibility set to **Public** (pending user repository creation/push).
+- [ ] Provide repository link and live execution logs in your email submission before the deadline (pending user submission).

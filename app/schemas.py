@@ -48,6 +48,58 @@ def clean_candidate_token(token: str) -> str:
     return cleaned
 
 
+import ipaddress
+
+
+def _validate_hostname_syntax(hostname: str, url: str) -> None:
+    """Validate hostname syntax against RFC 1123, RFC 3986, and IP address specifications."""
+    # Check for valid IPv4 or IPv6 address literal
+    try:
+        ipaddress.ip_address(hostname)
+        return
+    except ValueError:
+        pass
+
+    # Localhost is valid for local testing/development
+    if hostname.lower() == "localhost":
+        return
+
+    # Enforce domain length bounds (RFC 1035)
+    if len(hostname) > 253:
+        raise ValueError(f"Malformed URL '{url}': hostname exceeds 253 characters.")
+
+    if hostname.startswith(".") or hostname.endswith(".") or ".." in hostname:
+        raise ValueError(
+            f"Malformed URL '{url}': invalid hostname '{hostname}' with leading, trailing, or consecutive dots."
+        )
+
+    labels = hostname.split(".")
+    # Top-level domain cannot be all-numeric (RFC 1123 / RFC 3696)
+    if len(labels) > 1 and labels[-1].isdigit():
+        raise ValueError(
+            f"Malformed URL '{url}': top-level domain label '{labels[-1]}' cannot be all-numeric."
+        )
+
+    if len(labels) == 1 and hostname.isdigit():
+        raise ValueError(
+            f"Malformed URL '{url}': hostname '{hostname}' cannot be all-numeric."
+        )
+
+    for label in labels:
+        if not label:
+            raise ValueError(f"Malformed URL '{url}': empty label in hostname '{hostname}'.")
+        if len(label) > 63:
+            raise ValueError(f"Malformed URL '{url}': hostname label '{label}' exceeds 63 characters.")
+        if label.startswith("-") or label.endswith("-"):
+            raise ValueError(
+                f"Malformed URL '{url}': hostname label '{label}' cannot start or end with a hyphen."
+            )
+        if not re.match(r"^[a-zA-Z0-9-]+$", label):
+            raise ValueError(
+                f"Malformed URL '{url}': hostname label '{label}' contains invalid characters."
+            )
+
+
 def extract_and_validate_single_url(text: str) -> str:
     """Extract and strictly validate that natural text contains exactly one valid HTTP/HTTPS URL.
 
@@ -111,6 +163,9 @@ def extract_and_validate_single_url(text: str) -> str:
 
     if not hostname:
         raise ValueError(f"Invalid URL '{candidate}': missing hostname.")
+
+    # Strictly validate hostname syntax against RFC 1123 / IP address standards
+    _validate_hostname_syntax(hostname, candidate)
 
     # Validate port if specified
     try:

@@ -102,6 +102,90 @@ class TestUrlExtractionAndValidation:
         text_ipv6 = "Test loopback at http://[::1]:8000/api"
         assert extract_and_validate_single_url(text_ipv6) == "http://[::1]:8000/api"
 
+    def test_valid_complex_query_and_fragment(self):
+        """Verify URL with multiple query params and fragment identifier parses accurately."""
+        text = "Visit https://example.com/search?q=test&lang=en#section-1 for results."
+        assert extract_and_validate_single_url(text) == "https://example.com/search?q=test&lang=en#section-1"
+
+    def test_malformed_hostname_consecutive_dots(self):
+        """Verify domain with consecutive dots is rejected."""
+        text = "Check http://example..com for updates."
+        with pytest.raises(ValueError, match="leading, trailing, or consecutive dots"):
+            extract_and_validate_single_url(text)
+
+    def test_malformed_hostname_leading_hyphen(self):
+        """Verify domain with leading hyphen in label is rejected."""
+        text = "Check http://-example.com for info."
+        with pytest.raises(ValueError, match="cannot start or end with a hyphen"):
+            extract_and_validate_single_url(text)
+
+    def test_malformed_hostname_trailing_hyphen(self):
+        """Verify domain with trailing hyphen in label is rejected."""
+        text = "Check http://example-.com for info."
+        with pytest.raises(ValueError, match="cannot start or end with a hyphen"):
+            extract_and_validate_single_url(text)
+
+    def test_malformed_hostname_invalid_characters(self):
+        """Verify domain with invalid characters is rejected."""
+        text = "Check http://exam!ple.com for info."
+        with pytest.raises(ValueError, match="contains invalid characters"):
+            extract_and_validate_single_url(text)
+
+    def test_malformed_hostname_leading_dot(self):
+        """Verify domain with leading dot is rejected."""
+        text = "Check http://.example.com for info."
+        with pytest.raises(ValueError, match="leading, trailing, or consecutive dots"):
+            extract_and_validate_single_url(text)
+
+    def test_malformed_hostname_trailing_dot(self):
+        """Verify domain with trailing dot is rejected."""
+        text = "Check http://example.com./path for info."
+        with pytest.raises(ValueError, match="leading, trailing, or consecutive dots"):
+            extract_and_validate_single_url(text)
+
+    def test_malformed_hostname_all_numeric_tld(self):
+        """Verify domain with all-numeric TLD (non-IP) is rejected."""
+        text = "Check http://example.123 for info."
+        with pytest.raises(ValueError, match="cannot be all-numeric"):
+            extract_and_validate_single_url(text)
+
+    def test_malformed_hostname_all_numeric_invalid_ip(self):
+        """Verify invalid IPv4 with out-of-range octets is rejected."""
+        text = "Check http://999.999.999.999 for info."
+        with pytest.raises(ValueError, match="cannot be all-numeric"):
+            extract_and_validate_single_url(text)
+
+    def test_malformed_hostname_label_exceeding_63_chars(self):
+        """Verify domain label exceeding 63 characters is rejected."""
+        long_label = "a" * 64
+        text = f"Check http://{long_label}.com for info."
+        with pytest.raises(ValueError, match="exceeds 63 characters"):
+            extract_and_validate_single_url(text)
+
+    def test_port_out_of_range_high(self):
+        """Verify port number > 65535 is rejected."""
+        text = "Check http://example.com:70000 for info."
+        with pytest.raises(ValueError, match="invalid port specification"):
+            extract_and_validate_single_url(text)
+
+    def test_port_zero_rejected(self):
+        """Verify port number 0 is rejected."""
+        text = "Check http://example.com:0 for info."
+        with pytest.raises(ValueError, match="Port 0 is out of valid range"):
+            extract_and_validate_single_url(text)
+
+    def test_query_string_with_balanced_parentheses(self):
+        """Verify query string with balanced parentheses parses intact."""
+        text = "Search at https://example.com/search?q=(python_release)&filter=all for updates."
+        url = extract_and_validate_single_url(text)
+        assert url == "https://example.com/search?q=(python_release)&filter=all"
+
+    def test_prose_parentheses_wrapping_url_with_query_parentheses(self):
+        """Verify outer prose parentheses stripped while inner query parentheses preserved."""
+        text = "See (https://example.com/search?q=(python_release)) today."
+        url = extract_and_validate_single_url(text)
+        assert url == "https://example.com/search?q=(python_release)"
+
 
 class TestPostingRequestSchema:
     """Unit tests for the PostingRequest Pydantic model."""

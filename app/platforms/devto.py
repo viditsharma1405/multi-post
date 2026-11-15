@@ -31,11 +31,12 @@ class DevtoAdapter(BasePlatformAdapter):
         return "Dev.to is not configured: DEVTO_API_KEY is missing."
 
     def _parse_published_at(self, raw_timestamp: Optional[str]) -> tuple[Optional[str], Optional[str]]:
-        """Parse Dev.to's published_at or created_at timestamp into UTC (date, time).
+        """Parse Dev.to's published_at timestamp into UTC (date, time).
 
-        Returns (None, None) if the platform response does not confirm a timestamp.
+        Strictly does not use created_at as a fallback.
+        Returns (None, None) if published_at is missing, null, or invalid.
         """
-        if not raw_timestamp:
+        if not raw_timestamp or not isinstance(raw_timestamp, str):
             return None, None
 
         try:
@@ -67,7 +68,7 @@ class DevtoAdapter(BasePlatformAdapter):
 
         # Extract published article URL and publication timestamp
         posted_url = data.get("url")
-        timestamp_field = data.get("published_at") or data.get("created_at")
+        timestamp_field = data.get("published_at")
         date_str, time_str = self._parse_published_at(timestamp_field)
 
         return PlatformResult(

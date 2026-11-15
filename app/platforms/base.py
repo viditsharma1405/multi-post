@@ -105,9 +105,9 @@ class BasePlatformAdapter(abc.ABC):
         """Verify if a published post URL is publicly accessible without authentication.
 
         Distinguishes between:
-        - True: URL responded with HTTP 200-299 and is not redirected to a login page.
-        - False: URL responded with 401/403/404, network error, or redirected to a login/auth page.
-        - None: Indeterminate visibility (anti-bot challenge like Cloudflare, 429 rate limit, 503).
+        - True: URL responded with HTTP 200-299 and is not redirected to a login/auth page.
+        - False: URL responded with confirmed inaccessible status codes (401, 403, 404, 410) or redirected to a login/auth page.
+        - None: Indeterminate visibility (timeouts, network errors, anti-bot challenge like Cloudflare, 429 rate limit, 503, or non-authoritative server responses).
         """
         if not url:
             return None
@@ -148,10 +148,11 @@ class BasePlatformAdapter(abc.ABC):
             if resp.status_code in (429, 503):
                 # Rate limit or temporary service issue - indeterminate visibility
                 return None
-            return False
+            return None
         except httpx.TimeoutException:
             logger.warning("Timeout during public URL verification for %s: %s", self.platform_name, url)
-            return False
+            # Timeouts indicate an indeterminate state, not confirmed inaccessibility
+            return None
         except httpx.RequestError as exc:
             logger.warning(
                 "Network error during public URL verification for %s (%s): %s",
@@ -159,7 +160,8 @@ class BasePlatformAdapter(abc.ABC):
                 url,
                 self.sanitize_error(str(exc)),
             )
-            return False
+            # Network connection issues do not establish that content is private
+            return None
         except Exception as exc:
             logger.warning(
                 "Unexpected error during public URL verification for %s: %s",

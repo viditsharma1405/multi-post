@@ -267,7 +267,7 @@ class TestDevtoAdapter:
                 json={
                     "id": 987654,
                     "url": "https://dev.to/alice/custom-launch-title-xyz",
-                    # published_at and created_at omitted
+                    # published_at omitted
                 },
             )
         )
@@ -280,6 +280,57 @@ class TestDevtoAdapter:
 
         assert result.status == "success"
         # Must not fabricate timestamp if API omitted published_at
+        assert result.date is None
+        assert result.time is None
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_created_at_not_used_as_fallback_for_published_at(self, mock_settings):
+        """Dev.to timestamp: Do not use created_at as a fallback for published_at."""
+        respx.post("https://dev.to/api/articles").mock(
+            return_value=httpx.Response(
+                201,
+                json={
+                    "id": 987654,
+                    "url": "https://dev.to/alice/custom-launch-title-xyz",
+                    "created_at": "2026-11-15T08:00:00Z",
+                    "published_at": None,
+                },
+            )
+        )
+        respx.get("https://dev.to/alice/custom-launch-title-xyz").mock(
+            return_value=httpx.Response(200, text="Article")
+        )
+
+        adapter = DevtoAdapter(mock_settings)
+        result = await adapter.publish("Article https://example.com")
+
+        assert result.status == "success"
+        assert result.date is None
+        assert result.time is None
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_invalid_published_at_returns_none(self, mock_settings):
+        """Dev.to timestamp: Return null date/time if published_at is invalid."""
+        respx.post("https://dev.to/api/articles").mock(
+            return_value=httpx.Response(
+                201,
+                json={
+                    "id": 987654,
+                    "url": "https://dev.to/alice/custom-launch-title-xyz",
+                    "published_at": "not-a-valid-iso-date",
+                },
+            )
+        )
+        respx.get("https://dev.to/alice/custom-launch-title-xyz").mock(
+            return_value=httpx.Response(200, text="Article")
+        )
+
+        adapter = DevtoAdapter(mock_settings)
+        result = await adapter.publish("Article https://example.com")
+
+        assert result.status == "success"
         assert result.date is None
         assert result.time is None
 
@@ -520,7 +571,8 @@ class TestVerificationAndSanitization:
 
     @pytest.mark.asyncio
     @respx.mock
-    async def test_verification_timeout_sets_public_access_false(self, mock_settings):
+    async def test_verification_timeout_sets_public_access_none(self, mock_settings):
+        """Timeout during public URL verification must return None (indeterminate), preserving publication success."""
         respx.post("https://mastodon.social/api/v1/statuses").mock(
             return_value=httpx.Response(
                 200,
@@ -540,6 +592,60 @@ class TestVerificationAndSanitization:
         result = await adapter.publish("Post https://example.com")
 
         assert result.status == "success"
+        assert result.public_access is None
+
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_verification_network_error_sets_public_access_none(self, mock_settings):
+        """Network error during public URL verification must return None (indeterminate), preserving publication success."""
+        respx.post("https://mastodon.social/api/v1/statuses").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": "223",
+                    "url": "https://mastodon.social/@alice/223",
+                    "created_at": "2026-11-15T11:00:00Z",
+                },
+            )
+        )
+        # Verification network connection error
+        respx.get("https://mastodon.social/@alice/223").mock(
+            side_effect=httpx.ConnectError("Network unreachable")
+        )
+
+        adapter = MastodonAdapter(mock_settings)
+        result = await adapter.publish("Post https://example.com")
+
+        assert result.status == "success"
+        assert result.public_access is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status_code", [401, 403, 404, 410])
+    @respx.mock
+    async def test_verification_inaccessible_status_codes_set_public_access_false(
+        self, mock_settings, status_code
+    ):
+        """Confirmed inaccessible HTTP statuses (401, 403, 404, 410) must set public_access=False while preserving status='success'."""
+        post_url = f"https://mastodon.social/@alice/status-{status_code}"
+        respx.post("https://mastodon.social/api/v1/statuses").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "id": f"status-{status_code}",
+                    "url": post_url,
+                    "created_at": "2026-11-15T11:00:00Z",
+                },
+            )
+        )
+        respx.get(post_url).mock(
+            return_value=httpx.Response(status_code, text="Inaccessible")
+        )
+
+        adapter = MastodonAdapter(mock_settings)
+        result = await adapter.publish("Post https://example.com")
+
+        assert result.status == "success"
+        assert result.posted_url == post_url
         assert result.public_access is False
 
     def test_credential_sanitization(self, mock_settings):

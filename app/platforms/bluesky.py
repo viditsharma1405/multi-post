@@ -8,7 +8,15 @@ from app.schemas import PlatformResult
 
 
 class BlueskyAdapter(BasePlatformAdapter):
-    """Adapter for posting to Bluesky using the official AT Protocol XRPC endpoints."""
+    """Adapter for posting to Bluesky using the official AT Protocol XRPC endpoints.
+
+    Architectural Note on Timestamps:
+    Under the AT Protocol Lexicon (app.bsky.feed.post), `createdAt` is a mandatory
+    client-supplied record field rather than a timestamp generated or returned by
+    the createRecord API endpoint. This adapter formats `createdAt` in ISO 8601 UTC,
+    supplies it in the record payload, and reports this client-supplied metadata only
+    upon verified successful record creation confirmed by the AT URI and CID response.
+    """
 
     BLUESKY_HOST = "https://bsky.social"
 
@@ -107,7 +115,11 @@ class BlueskyAdapter(BasePlatformAdapter):
             rkey = post_uri.rstrip("/").split("/")[-1]
             posted_url = f"https://bsky.app/profile/{clean_handle}/post/{rkey}"
 
-        # Derive publication date and time strictly from confirmed record creation timestamp
+        # Step 4: Construct normalized result
+        # Note on AT Protocol timestamp: The AT Protocol Lexicon schema (app.bsky.feed.post)
+        # requires the client to supply `createdAt`. The API confirms acceptance of this record
+        # by returning the record's AT URI and CID. The date/time reported here reflects this
+        # client-supplied record metadata, populated only after successful server confirmation.
         dt = datetime.fromisoformat(created_at_iso.replace("Z", "+00:00")).astimezone(timezone.utc)
 
         return PlatformResult(
