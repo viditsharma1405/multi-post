@@ -20,11 +20,7 @@
 
 1. [Executive Summary & Problem Statement](#executive-summary--problem-statement)
 2. [End-to-End System Architecture](#end-to-end-system-architecture)
-3. [Interactive Workflows & Architecture Diagrams](#interactive-workflows--architecture-diagrams)
-   - [High-Level Component Architecture](#1-high-level-component-architecture)
-   - [End-to-End Request Lifecycle Sequence](#2-end-to-end-request-lifecycle-sequence)
-   - [Concurrent Fault Isolation & Resilience Flow](#3-concurrent-fault-isolation--resilience-flow)
-   - [Three-State Public Accessibility Verification](#4-three-state-public-accessibility-verification)
+3. [System Architecture Diagram](#system-architecture-diagram)
 4. [Platform Adapters & Protocol Specifications](#platform-adapters--protocol-specifications)
 5. [Repository Structure](#repository-structure)
 6. [Prerequisites & Installation](#prerequisites--installation)
@@ -108,9 +104,7 @@ Modern content creators, developer advocates, and marketing teams face an increa
 
 ---
 
-## 📊 Interactive Workflows & Architecture Diagrams
-
-### 1. High-Level Component Architecture
+## 📊 System Architecture Diagram
 
 ```mermaid
 flowchart TB
@@ -165,148 +159,6 @@ flowchart TB
     V_CHECK --> ORCH
     ORCH -->|Normalized JSON| UI
     UI --> STORE
-```
-
----
-
-### 2. End-to-End Request Lifecycle Sequence
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User as Content Creator
-    participant UI as React Frontend (:5174)
-    participant API as FastAPI (:4000)
-    participant Schema as Pydantic v2 Validator
-    participant Service as PostingService
-    participant Adapters as 5 Platform Adapters
-    participant Networks as External Social APIs
-    participant Verify as Public GET Verifier
-
-    User->>UI: Types message with link (<= 200 chars)
-    UI->>UI: Real-time URL extraction & boundary check
-    User->>UI: Clicks "Publish to All Platforms"
-    UI->>UI: Disables submit button & triggers loading state
-    UI->>API: POST /posting { message: "..." }
-    API->>Schema: Validate string length, exactly 1 URL, no extra fields
-    alt Schema Validation Fails
-        Schema-->>API: 422 Unprocessable Entity
-        API-->>UI: Structured error array with location & message
-        UI-->>User: Renders inline validation feedback
-    else Valid Payload
-        Schema-->>Service: Validated message & target URL
-        Service->>Adapters: Schedule all 5 coroutines via asyncio.gather()
-        par Parallel Execution
-            Adapters->>Networks: Bluesky (com.atproto.repo.createRecord)
-            Adapters->>Networks: Mastodon (POST /api/v1/statuses)
-            Adapters->>Networks: Dev.to (POST /api/articles)
-            Adapters->>Networks: Telegram (POST /sendMessage)
-            Adapters->>Networks: Discord (POST /webhooks/?wait=true)
-        end
-        Networks-->>Adapters: Success or Error Payloads
-        par Verification Checks
-            Adapters->>Verify: Perform async HTTP GET on generated public URLs
-            Verify-->>Adapters: Returns True (200), False (401/403/Login), or None
-        end
-        Adapters-->>Service: 5 PlatformResult objects
-        Service->>Service: Sanitize tokens, compute summary, set overall success
-        Service-->>API: PostingResponse
-        API-->>UI: 200 OK Normalized JSON
-        UI->>UI: Save record to localStorage
-        UI->>UI: Re-enable publish button & render Results Dashboard
-        UI-->>User: Displays dynamic success rate & external post links
-    end
-```
-
----
-
-### 3. Concurrent Fault Isolation & Resilience Flow
-
-```mermaid
-flowchart LR
-    Start([Posting Request]) --> Gather["asyncio.gather(return_exceptions=True)"]
-
-    subgraph PlatformRunners ["Isolated Worker Tasks"]
-        direction TB
-        subgraph Task1 ["Bluesky Worker"]
-            T1["Create Session & Record"] --> R1{Success?}
-            R1 -->|Yes| S1["Status: success\nposted_url: bsky.app/..."]
-            R1 -->|No| F1["Status: failed\nerror: Session invalid"]
-        end
-
-        subgraph Task2 ["Mastodon Worker"]
-            T2["POST /api/v1/statuses"] --> R2{Success?}
-            R2 -->|Yes| S2["Status: success\nposted_url: instance/@..."]
-            R2 -->|No| F2["Status: failed\nerror: HTTP 429 Rate limited"]
-        end
-
-        subgraph Task3 ["Dev.to Worker"]
-            T3["POST /api/articles"] --> R3{Success?}
-            R3 -->|Yes| S3["Status: success\nposted_url: dev.to/..."]
-            R3 -->|No| F3["Status: failed\nerror: 401 Unauthorized"]
-        end
-
-        subgraph Task4 ["Telegram Worker"]
-            T4["POST /sendMessage"] --> R4{Success?}
-            R4 -->|Yes| S4["Status: success\nposted_url: t.me/chan/..."]
-            R4 -->|No| F4["Status: failed\nerror: Bot not in channel"]
-        end
-
-        subgraph Task5 ["Discord Worker"]
-            T5["Execute Webhook"] --> R5{Success?}
-            R5 -->|Yes| S5["Status: success\nposted_url: discord.com/..."]
-            R5 -->|No| F5["Status: failed\nerror: Webhook 404 deleted"]
-        end
-    end
-
-    Gather --> Task1 & Task2 & Task3 & Task4 & Task5
-
-    S1 & F1 & S2 & F2 & S3 & F3 & S4 & F4 & S5 & F5 --> Aggregator["Result Aggregator\n- Successful: 3\n- Failed: 2\n- Overall: true\n- Zero unhandled exceptions"]
-    Aggregator --> Output([200 OK Client Response])
-```
-
----
-
-### 4. Three-State Public Accessibility Verification
-
-```mermaid
-stateDiagram-v2
-    [*] --> PostPublication: Publication Successful (status = success)
-    
-    state HasPublicUrl <<choice>>
-    PostPublication --> HasPublicUrl: URL Generated?
-    
-    HasPublicUrl --> PrivateOrNoUrl: No (Private Channel / No Guild)
-    PrivateOrNoUrl --> NullState: public_access = null
-
-    HasPublicUrl --> HTTP_GET: Yes (posted_url exists)
-    
-    state HTTP_GET {
-        [*] --> SendRequest: GET Request with Browser User-Agent
-        SendRequest --> CheckResponse
-    }
-
-    state CheckResponse <<choice>>
-    CheckResponse --> Status2xx: HTTP 200..299 & No Redirect
-    CheckResponse --> StatusInaccessible: HTTP 401, 403, 404, 410 or Redirect to Login
-    CheckResponse --> StatusIndeterminate: Timeout, Network Error, Cloudflare, 429, 503
-
-    Status2xx --> TrueState: public_access = true\n(Publicly Accessible)
-    StatusInaccessible --> FalseState: public_access = false\n(Not Publicly Accessible)
-    StatusIndeterminate --> NullState: public_access = null\n(Unknown / Not Available)
-
-    note right of TrueState
-      Unauthenticated users can view post
-    end note
-
-    note right of FalseState
-      Requires platform login or membership
-    end note
-
-    note right of NullState
-      Never interpreted as false!
-      Preserves publication success status.
-    end note
 ```
 
 ---
