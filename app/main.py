@@ -6,7 +6,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.config import Settings, get_settings
 from app.schemas import HealthResponse, PostingRequest, PostingResponse
@@ -73,6 +73,12 @@ def get_posting_service(
 ) -> PostingService:
     """Dependency provider for PostingService."""
     return PostingService(settings=settings)
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    """Redirect root access directly to interactive Swagger UI documentation."""
+    return RedirectResponse(url="/docs")
 
 
 @app.get(
