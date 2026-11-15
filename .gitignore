@@ -1,0 +1,33 @@
+# Environments and Virtualenvs
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment secrets
+.env
+.env.local
+.env.*.local
+
+# Python cache & bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Testing and Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+
+# OS and Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
