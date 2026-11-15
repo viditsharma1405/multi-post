@@ -47,7 +47,7 @@ This system provides a single, unified endpoint `POST /posting` running on port 
 - **Public URL Verification**: Post-publication HTTP GET requests distinguish between successful submission and actual unauthenticated public availability. Verification failure does not demote publication success.
 - **Zero Startup Crashes on Missing Secrets**: Platform credentials default to `None` with graceful per-platform error reporting if environment variables are not supplied.
 - **Enterprise-Grade Sanitization**: Automatic masking of Telegram bot tokens, Discord webhook secrets, Bearer tokens, and sensitive keys from all logs and error messages.
-- **Comprehensive Test Coverage**: 52 automated pytest test cases validating schemas, URL extraction edge cases, mocked platform adapters (`respx`), and full API integration flows.
+- **Comprehensive Test Coverage**: 65 automated pytest test cases validating schemas, URL extraction edge cases, mocked platform adapters (`respx`), and full API integration flows.
 
 ---
 
@@ -472,7 +472,7 @@ pytest tests/test_posting.py -v
 Before submitting before the **November 22, 2026** deadline, verify:
 
 - [x] Repository contains required structure: `app/`, `tests/`, `.env.example`, `.gitignore`, `requirements.txt`, and `README.md`.
-- [x] All 52 automated tests pass (`pytest -v`).
+- [x] All 65 automated tests pass (`pytest -v`).
 - [x] Application successfully launches with `uvicorn app.main:app --host 0.0.0.0 --port 4000`.
 - [x] Interactive Swagger UI loads at `http://localhost:4000/docs`.
 - [x] `.env` is omitted from Git tracking (`git status` confirms no `.env` or credentials tracked).
