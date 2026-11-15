@@ -84,8 +84,8 @@ class DiscordAdapter(BasePlatformAdapter):
         # Discord message URLs require guild_id + channel_id + message_id.
         # If guild context is configured, construct the URL. Otherwise return null.
         posted_url: Optional[str] = None
-        if self.settings.discord_guild_id and channel_id and message_id:
-            guild_id = self.settings.discord_guild_id
+        guild_id = self.settings.discord_guild_id
+        if guild_id and not str(guild_id).startswith("YOUR_") and channel_id and message_id:
             posted_url = f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
 
         return PlatformResult(
