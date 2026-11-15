@@ -39,7 +39,8 @@ class BlueskyAdapter(BasePlatformAdapter):
 
         access_jwt = session_data.get("accessJwt")
         did = session_data.get("did")
-        handle = session_data.get("handle") or self.settings.bluesky_handle
+        raw_handle = session_data.get("handle") or self.settings.bluesky_handle
+        clean_handle = raw_handle.lstrip("@") if raw_handle else did
 
         if not access_jwt or not did:
             return PlatformResult(
@@ -48,19 +49,45 @@ class BlueskyAdapter(BasePlatformAdapter):
                 error="Bluesky authentication failed: missing accessJwt or did in response.",
             )
 
-        # Step 2: Create post record
+        # Step 2: Build post record with AT Protocol rich-text link facets
         create_record_url = f"{self.BLUESKY_HOST}/xrpc/com.atproto.repo.createRecord"
         now_utc = datetime.now(timezone.utc)
         created_at_iso = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
 
+        record: dict = {
+            "$type": "app.bsky.feed.post",
+            "text": message,
+            "createdAt": created_at_iso,
+        }
+
+        # In AT Protocol, URLs require explicit facet annotations with UTF-8 byte offsets
+        # to render as clickable links in Bluesky clients
+        try:
+            from app.schemas import extract_and_validate_single_url
+            cta_url = extract_and_validate_single_url(message)
+            msg_bytes = message.encode("utf-8")
+            url_bytes = cta_url.encode("utf-8")
+            byte_start = msg_bytes.find(url_bytes)
+            if byte_start != -1:
+                byte_end = byte_start + len(url_bytes)
+                record["facets"] = [
+                    {
+                        "index": {"byteStart": byte_start, "byteEnd": byte_end},
+                        "features": [
+                            {
+                                "$type": "app.bsky.richtext.facet#link",
+                                "uri": cta_url,
+                            }
+                        ],
+                    }
+                ]
+        except Exception:
+            pass
+
         record_payload = {
             "repo": did,
             "collection": "app.bsky.feed.post",
-            "record": {
-                "$type": "app.bsky.feed.post",
-                "text": message,
-                "createdAt": created_at_iso,
-            },
+            "record": record,
         }
 
         headers = {
@@ -78,14 +105,17 @@ class BlueskyAdapter(BasePlatformAdapter):
         posted_url = None
         if post_uri:
             rkey = post_uri.rstrip("/").split("/")[-1]
-            posted_url = f"https://bsky.app/profile/{handle}/post/{rkey}"
+            posted_url = f"https://bsky.app/profile/{clean_handle}/post/{rkey}"
+
+        # Derive publication date and time strictly from confirmed record creation timestamp
+        dt = datetime.fromisoformat(created_at_iso.replace("Z", "+00:00")).astimezone(timezone.utc)
 
         return PlatformResult(
             platform=self.platform_name,
             status="success",
             posted_url=posted_url,
             public_access=None,  # Will be evaluated by BasePlatformAdapter.verify_public_url
-            date=now_utc.strftime("%Y-%m-%d"),
-            time=now_utc.strftime("%H:%M:%S"),
+            date=dt.strftime("%Y-%m-%d"),
+            time=dt.strftime("%H:%M:%S"),
             error=None,
         )

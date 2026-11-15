@@ -7,28 +7,44 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-# Regular expression designed to capture URLs, URI schemes, and web-like references
-# embedded within natural language text without false positives on ordinary punctuation.
+# Regular expression capturing URLs with scheme, explicit special URI schemes (mailto, javascript),
+# or raw 'www.' domain prefixes. Bare email addresses (e.g. user@domain.com) are excluded
+# so natural prose containing an email alongside a link does not trigger a false multiple-URL error.
 URL_PATTERN = re.compile(
-    r"(?:[a-zA-Z][a-zA-Z0-9+.-]*://[^\s<>\"\']*|[a-zA-Z0-9+.-]+@[^\s<>\"\']+|www\.[^\s<>\"\']+|javascript:[^\s<>\"\']+|mailto:[^\s<>\"\']+)"
+    r"(?:[a-zA-Z][a-zA-Z0-9+.-]*://[^\s<>\"\']*|javascript:[^\s<>\"\']+|mailto:[^\s<>\"\']+|www\.[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}[^\s<>\"\']*)"
 )
 
 # Common sentence-ending and formatting punctuation characters attached to URLs in prose
-TRAILING_PUNCTUATION = ".,;:!?)]}>\"'\\`"
 LEADING_PUNCTUATION = "([<\"'\\`"
 
 
 def clean_candidate_token(token: str) -> str:
     """Strip extraneous leading/trailing punctuation from candidate URL tokens.
 
-    In natural language sentences, URLs are frequently enclosed in parentheses
-    or end with sentence-terminating periods, commas, or question marks.
-    This function strips leading/trailing prose punctuation while preserving
-    valid internal characters.
+    Preserves balanced closing parentheses (such as Wikipedia article URLs e.g.
+    'https://en.wikipedia.org/wiki/Python_(programming_language)') while stripping
+    unmatched trailing parentheses from prose wrappers like '(https://example.com)'.
+    Also preserves IPv6 closing brackets ('http://[::1]:8080/').
     """
     cleaned = token.strip(LEADING_PUNCTUATION)
-    while cleaned and cleaned[-1] in TRAILING_PUNCTUATION:
-        cleaned = cleaned[:-1]
+    while cleaned:
+        last_char = cleaned[-1]
+        if last_char in ".,;:!?\"'\\`":
+            cleaned = cleaned[:-1]
+        elif last_char == ")":
+            if cleaned.count(")") > cleaned.count("("):
+                cleaned = cleaned[:-1]
+            else:
+                break
+        elif last_char == "]":
+            if cleaned.count("]") > cleaned.count("["):
+                cleaned = cleaned[:-1]
+            else:
+                break
+        elif last_char in ">}":
+            cleaned = cleaned[:-1]
+        else:
+            break
     return cleaned
 
 

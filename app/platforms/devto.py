@@ -31,18 +31,19 @@ class DevtoAdapter(BasePlatformAdapter):
         return "Dev.to is not configured: DEVTO_API_KEY is missing."
 
     def _parse_published_at(self, raw_timestamp: Optional[str]) -> tuple[Optional[str], Optional[str]]:
-        """Parse Dev.to's published_at or created_at timestamp into UTC (date, time)."""
+        """Parse Dev.to's published_at or created_at timestamp into UTC (date, time).
+
+        Returns (None, None) if the platform response does not confirm a timestamp.
+        """
         if not raw_timestamp:
-            now = datetime.now(timezone.utc)
-            return now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S")
+            return None, None
 
         try:
             clean_ts = raw_timestamp.replace("Z", "+00:00")
             dt = datetime.fromisoformat(clean_ts).astimezone(timezone.utc)
             return dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M:%S")
         except Exception:
-            now = datetime.now(timezone.utc)
-            return now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S")
+            return None, None
 
     async def _publish_impl(self, message: str, client: httpx.AsyncClient) -> PlatformResult:
         """Create and publish an article on Dev.to."""

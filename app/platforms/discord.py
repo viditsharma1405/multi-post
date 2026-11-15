@@ -45,18 +45,19 @@ class DiscordAdapter(BasePlatformAdapter):
         return urlunparse(parsed._replace(query=new_query))
 
     def _parse_timestamp(self, raw_timestamp: Optional[str]) -> tuple[Optional[str], Optional[str]]:
-        """Parse Discord's ISO 8601 timestamp into UTC (date, time)."""
+        """Parse Discord's ISO 8601 timestamp into UTC (date, time).
+
+        Returns (None, None) if the webhook response omits or provides an invalid timestamp.
+        """
         if not raw_timestamp:
-            now = datetime.now(timezone.utc)
-            return now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S")
+            return None, None
 
         try:
             clean_ts = raw_timestamp.replace("Z", "+00:00")
             dt = datetime.fromisoformat(clean_ts).astimezone(timezone.utc)
             return dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M:%S")
         except Exception:
-            now = datetime.now(timezone.utc)
-            return now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S")
+            return None, None
 
     async def _publish_impl(self, message: str, client: httpx.AsyncClient) -> PlatformResult:
         """Execute the Discord webhook with wait=true to capture message ID and metadata."""
@@ -65,8 +66,15 @@ class DiscordAdapter(BasePlatformAdapter):
 
         response = await client.post(webhook_url, json=payload)
         response.raise_for_status()
-        data = response.json()
 
+        if response.status_code == 204:
+            return PlatformResult(
+                platform=self.platform_name,
+                status="failed",
+                error="Discord API returned HTTP 204 No Content; message object not received.",
+            )
+
+        data = response.json()
         message_id = data.get("id")
         channel_id = data.get("channel_id")
         timestamp_str = data.get("timestamp")

@@ -56,6 +56,7 @@ class BasePlatformAdapter(abc.ABC):
         - Telegram bot tokens: e.g. bot123456:ABC-DEF -> bot***:***
         - Discord webhook URLs: e.g. webhooks/123/xyz -> webhooks/123/***
         - Bearer auth tokens: e.g. Bearer eyJ... -> Bearer ***
+        - Query string and header API keys/tokens: e.g. api_key=xyz -> api_key=***
         - Configured secret values: matches of actual passwords or keys in settings.
         """
         if not message:
@@ -74,6 +75,14 @@ class BasePlatformAdapter(abc.ABC):
         # Sanitize Bearer tokens
         sanitized = re.sub(
             r"(Bearer\s+)[A-Za-z0-9._-]+", r"\1***", sanitized, flags=re.IGNORECASE
+        )
+
+        # Sanitize API keys and passwords in query params or error payloads
+        sanitized = re.sub(
+            r"(api[-_]?key[=:\s]+)[A-Za-z0-9._-]+", r"\1***", sanitized, flags=re.IGNORECASE
+        )
+        sanitized = re.sub(
+            r"(password[=:\s]+)[^\s&\"']+", r"\1***", sanitized, flags=re.IGNORECASE
         )
 
         # Sanitize specific configured secrets
@@ -95,10 +104,10 @@ class BasePlatformAdapter(abc.ABC):
     async def verify_public_url(self, url: str, client: httpx.AsyncClient) -> Optional[bool]:
         """Verify if a published post URL is publicly accessible without authentication.
 
-        Returns:
-            True: URL responded with HTTP 200-299 OK status.
-            False: URL responded with 401, 403, 404, or network error.
-            None: Visibility could not be determined (e.g. anti-bot challenge or rate limit).
+        Distinguishes between:
+        - True: URL responded with HTTP 200-299 and is not redirected to a login page.
+        - False: URL responded with 401/403/404, network error, or redirected to a login/auth page.
+        - None: Indeterminate visibility (anti-bot challenge like Cloudflare, 429 rate limit, 503).
         """
         if not url:
             return None
@@ -110,12 +119,34 @@ class BasePlatformAdapter(abc.ABC):
                 follow_redirects=True,
                 timeout=self.settings.verification_timeout_seconds,
             )
+
+            # Check if redirect landed on an authentication or login portal
+            if resp.history:
+                final_path = resp.url.path.lower()
+                final_url_str = str(resp.url).lower()
+                auth_indicators = ("/login", "/signin", "/sign_in", "/auth", "/session/new")
+                if any(ind in final_path or ind in final_url_str for ind in auth_indicators):
+                    logger.info("Verification for %s redirected to auth/login page: %s", self.platform_name, resp.url)
+                    return False
+
+            # Check for Cloudflare / anti-bot challenge interstitial pages
+            body_sample = resp.text[:1000].lower() if hasattr(resp, "text") else ""
+            is_bot_challenge = (
+                "cf-mitigated" in resp.headers
+                or "just a moment..." in body_sample
+                or "challenge-platform" in body_sample
+                or "attention required!" in body_sample
+            )
+            if is_bot_challenge:
+                logger.info("Anti-bot challenge encountered during verification of %s: %s", self.platform_name, url)
+                return None
+
             if 200 <= resp.status_code < 300:
                 return True
             if resp.status_code in (401, 403, 404, 410):
                 return False
             if resp.status_code in (429, 503):
-                # Rate limit or anti-bot challenge - cannot reliably determine public state
+                # Rate limit or temporary service issue - indeterminate visibility
                 return None
             return False
         except httpx.TimeoutException:

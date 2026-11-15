@@ -76,6 +76,32 @@ class TestUrlExtractionAndValidation:
         with pytest.raises(ValueError, match="invalid port specification"):
             extract_and_validate_single_url(text)
 
+    def test_wikipedia_url_with_balanced_parentheses(self):
+        """Verify closing parenthesis inside URL path is not stripped."""
+        text = "Learn Python at https://en.wikipedia.org/wiki/Python_(programming_language)."
+        url = extract_and_validate_single_url(text)
+        assert url == "https://en.wikipedia.org/wiki/Python_(programming_language)"
+
+    def test_wikipedia_url_enclosed_in_prose_parentheses(self):
+        """Verify only the outer prose parenthesis is stripped, preserving the internal one."""
+        text = "Resource: (https://en.wikipedia.org/wiki/Python_(programming_language)) today!"
+        url = extract_and_validate_single_url(text)
+        assert url == "https://en.wikipedia.org/wiki/Python_(programming_language)"
+
+    def test_email_address_alongside_http_url(self):
+        """Verify bare email address is not treated as a candidate URL."""
+        text = "Email us at support@example.com or visit https://example.com/portal"
+        url = extract_and_validate_single_url(text)
+        assert url == "https://example.com/portal"
+
+    def test_ipv4_and_ipv6_urls(self):
+        """Verify IPv4 and bracketed IPv6 URLs parse correctly."""
+        text_ipv4 = "Access admin at http://192.168.1.1:8080/dashboard"
+        assert extract_and_validate_single_url(text_ipv4) == "http://192.168.1.1:8080/dashboard"
+
+        text_ipv6 = "Test loopback at http://[::1]:8000/api"
+        assert extract_and_validate_single_url(text_ipv6) == "http://[::1]:8000/api"
+
 
 class TestPostingRequestSchema:
     """Unit tests for the PostingRequest Pydantic model."""

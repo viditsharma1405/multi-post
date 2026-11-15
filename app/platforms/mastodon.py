@@ -24,10 +24,13 @@ class MastodonAdapter(BasePlatformAdapter):
         )
 
     def _parse_created_at(self, raw_timestamp: Optional[str]) -> tuple[Optional[str], Optional[str]]:
-        """Parse Mastodon's ISO 8601 created_at timestamp into UTC (date, time) strings."""
+        """Parse Mastodon's ISO 8601 created_at timestamp into UTC (date, time) strings.
+
+        Returns (None, None) if the platform omitted or returned an invalid timestamp,
+        strictly complying with the requirement never to fabricate publication times.
+        """
         if not raw_timestamp:
-            now = datetime.now(timezone.utc)
-            return now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S")
+            return None, None
 
         try:
             # Handle ISO string with Z or timezone offset
@@ -35,11 +38,10 @@ class MastodonAdapter(BasePlatformAdapter):
             dt = datetime.fromisoformat(clean_ts).astimezone(timezone.utc)
             return dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M:%S")
         except Exception:
-            now = datetime.now(timezone.utc)
-            return now.strftime("%Y-%m-%d"), now.strftime("%H:%M:%S")
+            return None, None
 
     async def _publish_impl(self, message: str, client: httpx.AsyncClient) -> PlatformResult:
-        """Post a status update to the configured Mastodon instance."""
+        """Post a status update to the configured Mastodon instance with public visibility."""
         base_url = self.settings.mastodon_instance_url.rstrip("/")
         endpoint = f"{base_url}/api/v1/statuses"
 
@@ -47,7 +49,11 @@ class MastodonAdapter(BasePlatformAdapter):
             "Authorization": f"Bearer {self.settings.mastodon_access_token}",
             "Content-Type": "application/json",
         }
-        payload = {"status": message}
+        # Explicitly set visibility to public so post is not hidden under private profile defaults
+        payload = {
+            "status": message,
+            "visibility": "public",
+        }
 
         response = await client.post(endpoint, json=payload, headers=headers)
         response.raise_for_status()

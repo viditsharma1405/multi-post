@@ -53,9 +53,13 @@ class TelegramAdapter(BasePlatformAdapter):
 
         # Telegram public URLs can only be constructed when a public channel username is present.
         # Private channels (numeric ID), direct messages, or private groups do not possess public web URLs.
+        configured_chat_id = str(self.settings.telegram_chat_id or "").strip()
+        chat_id_username = configured_chat_id if configured_chat_id.startswith("@") else None
+
         channel_username = (
             chat_info.get("username")
             or self.settings.telegram_channel_username
+            or chat_id_username
         )
 
         posted_url: Optional[str] = None
@@ -65,14 +69,15 @@ class TelegramAdapter(BasePlatformAdapter):
 
         # Parse publication timestamp from Telegram's Unix timestamp
         unix_date = result_data.get("date")
-        if unix_date:
-            dt = datetime.fromtimestamp(unix_date, tz=timezone.utc)
-            date_str = dt.strftime("%Y-%m-%d")
-            time_str = dt.strftime("%H:%M:%S")
-        else:
-            now = datetime.now(timezone.utc)
-            date_str = now.strftime("%Y-%m-%d")
-            time_str = now.strftime("%H:%M:%S")
+        date_str: Optional[str] = None
+        time_str: Optional[str] = None
+        if unix_date is not None and isinstance(unix_date, (int, float)):
+            try:
+                dt = datetime.fromtimestamp(unix_date, tz=timezone.utc)
+                date_str = dt.strftime("%Y-%m-%d")
+                time_str = dt.strftime("%H:%M:%S")
+            except Exception:
+                date_str, time_str = None, None
 
         return PlatformResult(
             platform=self.platform_name,
