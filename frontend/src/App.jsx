@@ -173,10 +173,9 @@ export default function App() {
         </main>
 
         {/* Footer */}
-        <footer className="py-6 px-8 border-t border-slate-800/80 text-center text-xs text-slate-500">
+        <footer className="py-4 px-8 border-t border-slate-800/60 text-center text-xs text-slate-500">
           <p>
-            MultiPost — Production-Grade Automated Multi-Platform Posting System. 
-            Connected to port 4000 FastAPI backend.
+            MultiPost • One message. Five platforms. Zero repetitive work.
           </p>
         </footer>
 

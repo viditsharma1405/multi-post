@@ -5,16 +5,11 @@ import {
   CheckCircle2, 
   AlertTriangle, 
   XCircle, 
-  Sparkles, 
   Trash2, 
-  HelpCircle,
-  Loader2,
-  ExternalLink
+  Loader2 
 } from 'lucide-react';
 import { analyzeMessageUrls } from '../utils/urlValidator';
 import { publishPost } from '../services/api';
-import PlatformIcon from './PlatformIcon';
-import { ORDERED_PLATFORMS } from '../utils/platforms';
 
 export default function PostComposer({ 
   onPublishSuccess, 
@@ -43,12 +38,6 @@ export default function PostComposer({
     if (!urlAnalysis.isValid) return false;
     return true;
   }, [message, isOverLimit, urlAnalysis]);
-
-  // Load a sample valid launch post
-  const handleLoadSample = () => {
-    setMessage("Check out our latest business platform and grow your online visibility. https://example.com");
-    setApiErrors([]);
-  };
 
   const handleClear = () => {
     setMessage('');
@@ -84,40 +73,11 @@ export default function PostComposer({
   };
 
   return (
-    <div className="bg-[#111827] border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
+    <div className="bg-[#111827] border border-slate-800 rounded-xl shadow-lg overflow-hidden">
       {/* Composer Card Header */}
-      <div className="px-6 py-4 bg-slate-900/60 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center space-x-2">
-          <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
-            <Sparkles className="w-4 h-4 text-indigo-400" />
-          </div>
-          <div>
-            <h2 className="text-base font-bold text-white tracking-tight">Broadcast Composer</h2>
-            <p className="text-[11px] text-slate-400">Single dispatch across all 5 active social channels</p>
-          </div>
-        </div>
-
-        {/* Quick platform badges */}
-        <div className="flex items-center space-x-1.5 bg-slate-950/60 px-2.5 py-1.5 rounded-xl border border-slate-800/80">
-          <span className="text-[11px] font-medium text-slate-400 mr-1.5 hidden sm:inline">Destinations:</span>
-          {ORDERED_PLATFORMS.map((plat) => {
-            const isReady = Boolean(platformsConfigured[plat]);
-            return (
-              <div 
-                key={plat} 
-                className={`relative p-1 rounded-md transition-opacity ${
-                  isReady ? 'opacity-100 bg-slate-800/80' : 'opacity-40 grayscale bg-slate-900'
-                }`}
-                title={`${plat.toUpperCase()} (${isReady ? 'Ready' : 'Unconfigured'})`}
-              >
-                <PlatformIcon platform={plat} size={15} className="w-3.5 h-3.5" />
-                {isReady && (
-                  <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-400 ring-1 ring-slate-950" />
-                )}
-              </div>
-            );
-          })}
-        </div>
+      <div className="px-5 py-3.5 bg-slate-900/50 border-b border-slate-800 flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-white">Compose Post</h2>
+        <span className="text-xs text-slate-500">Max 200 characters • 1 link required</span>
       </div>
 
       {/* Composer Form Body */}
@@ -237,32 +197,20 @@ export default function PostComposer({
         )}
 
         {/* Action Controls Footer */}
-        <div className="mt-6 pt-5 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
-          {/* Sample template trigger */}
-          <button
-            type="button"
-            onClick={handleLoadSample}
-            disabled={isSubmitting}
-            className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center space-x-1.5 py-1 px-2.5 rounded-lg hover:bg-indigo-500/10 transition-colors"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Load sample announcement</span>
-          </button>
-
-          {/* Submit Button */}
+        <div className="mt-5 pt-4 border-t border-slate-800/80 flex items-center justify-end">
           <button
             type="submit"
             disabled={!isFormValid || isSubmitting || !isBackendConnected}
-            className={`w-full sm:w-auto px-6 py-3 rounded-xl font-semibold text-sm flex items-center justify-center space-x-2.5 transition-all duration-200 shadow-lg ${
+            className={`w-full sm:w-auto px-5 py-2.5 rounded-lg font-semibold text-xs md:text-sm flex items-center justify-center space-x-2 transition-all duration-200 ${
               isFormValid && !isSubmitting && isBackendConnected
-                ? 'bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white shadow-indigo-500/25 hover:shadow-indigo-500/40 cursor-pointer active:scale-[0.98]'
+                ? 'bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer shadow-md shadow-indigo-600/20 active:scale-[0.98]'
                 : 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed shadow-none'
             }`}
           >
             {isSubmitting ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin text-white" />
-                <span>Broadcasting to 5 Platforms...</span>
+                <span>Publishing to 5 platforms...</span>
               </>
             ) : (
               <>

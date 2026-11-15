@@ -49,44 +49,29 @@ export default function HistoryPage({
   };
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto animate-in fade-in duration-300">
+    <div className="space-y-5 max-w-4xl mx-auto animate-in fade-in duration-300">
       
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h2 className="text-xl md:text-2xl font-extrabold text-white tracking-tight flex items-center space-x-2.5">
-            <HistoryIcon className="w-6 h-6 text-indigo-400" />
-            <span>Publishing History</span>
-          </h2>
-          <p className="text-xs md:text-sm text-slate-400 mt-1">
-            Browse previous broadcast runs saved in your local browser storage.
-          </p>
+      <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+        <div className="flex items-center space-x-2">
+          <span className="text-xs text-slate-400">Stored locally in browser</span>
+          <span className="text-xs text-slate-600">•</span>
+          <span className="text-xs text-indigo-400 font-mono">{history.length} records</span>
         </div>
 
         {history.length > 0 && (
           <button
             onClick={() => {
-              if (window.confirm('Are you sure you want to clear your local publishing history?')) {
+              if (window.confirm('Clear your local publishing history?')) {
                 onClearHistory();
               }
             }}
-            className="self-start sm:self-auto px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-rose-950/40 text-slate-400 hover:text-rose-300 border border-slate-800 hover:border-rose-900/40 text-xs font-semibold flex items-center space-x-1.5 transition-colors"
+            className="px-3 py-1 rounded-lg bg-slate-900 hover:bg-rose-950/40 text-slate-400 hover:text-rose-300 border border-slate-800 text-xs font-medium flex items-center space-x-1.5 transition-colors"
           >
             <Trash2 className="w-3.5 h-3.5" />
-            <span>Clear Local History</span>
+            <span>Clear History</span>
           </button>
         )}
-      </div>
-
-      {/* Transparency Disclaimer Notice */}
-      <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800/80 text-xs text-slate-400 flex items-start space-x-3">
-        <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-        <div>
-          <span className="font-semibold text-slate-200">Local Browser Storage Notice:</span>
-          <p className="mt-0.5 text-slate-400">
-            This log is stored locally in your browser’s <code className="text-indigo-300 font-mono text-[11px]">localStorage</code> for your convenience. It is not saved on the backend database or tracked across multiple devices.
-          </p>
-        </div>
       </div>
 
       {/* Filter Tabs */}

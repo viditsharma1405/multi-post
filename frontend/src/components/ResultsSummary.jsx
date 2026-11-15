@@ -81,67 +81,50 @@ export default function ResultsSummary({ resultData, onDismiss, onComposeAnother
         </div>
       </div>
 
-      <div className="p-6">
-        {/* Published message snippet */}
-        {message && (
-          <div className="mb-6 p-4 rounded-xl bg-slate-950/70 border border-slate-800/80 text-xs">
-            <span className="text-slate-500 font-semibold uppercase tracking-wider text-[10px] block mb-1">
-              Dispatched Payload
-            </span>
-            <p className="text-slate-200 font-sans leading-relaxed break-words">{message}</p>
-          </div>
-        )}
-
+      <div className="p-5">
         {/* 4 Summary Stat Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
           {/* Total Platforms */}
-          <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800">
+          <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800">
             <div className="flex items-center justify-between text-slate-400 text-xs font-medium">
               <span>Total Platforms</span>
-              <Layers className="w-4 h-4 text-slate-500" />
+              <Layers className="w-3.5 h-3.5 text-slate-500" />
             </div>
-            <div className="mt-2 text-2xl font-bold text-white tracking-tight">{total}</div>
-            <span className="text-[10px] text-slate-500 mt-0.5 block">Concurrent destinations</span>
+            <div className="mt-1 text-2xl font-bold text-white tracking-tight">{total}</div>
           </div>
 
           {/* Successful */}
-          <div className="p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+          <div className="p-3.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
             <div className="flex items-center justify-between text-emerald-400 text-xs font-medium">
               <span>Successful</span>
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
             </div>
-            <div className="mt-2 text-2xl font-bold text-emerald-400 tracking-tight">{successful}</div>
-            <span className="text-[10px] text-emerald-500/80 mt-0.5 block">Delivered updates</span>
+            <div className="mt-1 text-2xl font-bold text-emerald-400 tracking-tight">{successful}</div>
           </div>
 
           {/* Failed */}
-          <div className="p-4 rounded-xl bg-rose-500/5 border border-rose-500/20">
+          <div className="p-3.5 rounded-xl bg-rose-500/5 border border-rose-500/20">
             <div className="flex items-center justify-between text-rose-400 text-xs font-medium">
               <span>Failed</span>
-              <XCircle className="w-4 h-4 text-rose-400" />
+              <XCircle className="w-3.5 h-3.5 text-rose-400" />
             </div>
-            <div className="mt-2 text-2xl font-bold text-rose-400 tracking-tight">{failed}</div>
-            <span className="text-[10px] text-rose-500/80 mt-0.5 block">Errors isolated</span>
+            <div className="mt-1 text-2xl font-bold text-rose-400 tracking-tight">{failed}</div>
           </div>
 
           {/* Success Rate */}
-          <div className="p-4 rounded-xl bg-indigo-500/5 border border-indigo-500/20">
+          <div className="p-3.5 rounded-xl bg-indigo-500/5 border border-indigo-500/20">
             <div className="flex items-center justify-between text-indigo-400 text-xs font-medium">
               <span>Success Rate</span>
-              <TrendingUp className="w-4 h-4 text-indigo-400" />
+              <TrendingUp className="w-3.5 h-3.5 text-indigo-400" />
             </div>
-            <div className="mt-2 text-2xl font-bold text-indigo-400 tracking-tight">{successRate}%</div>
-            <span className="text-[10px] text-indigo-400/80 mt-0.5 block">Calculated dynamically</span>
+            <div className="mt-1 text-2xl font-bold text-indigo-400 tracking-tight">{successRate}%</div>
           </div>
         </div>
 
         {/* Section title for individual platforms */}
-        <div className="mb-4 flex items-center justify-between">
-          <h4 className="text-sm font-bold text-white tracking-tight flex items-center space-x-2">
-            <span>Per-Platform Breakdown</span>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-mono">
-              5 of 5 Platforms Isolated
-            </span>
+        <div className="mb-3">
+          <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            Platform Results
           </h4>
         </div>
 

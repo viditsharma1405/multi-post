@@ -46,21 +46,20 @@ export default function PlatformResult({ result }) {
             <PlatformIcon platform={platform} size={22} className="w-5 h-5" />
           </div>
           <div>
-            <h4 className="text-sm font-bold text-white flex items-center space-x-1.5">
-              <span>{meta.name}</span>
+            <h4 className="text-sm font-semibold text-white">
+              {meta.name}
             </h4>
-            <span className="text-[10px] text-slate-400 font-mono">{meta.protocol}</span>
           </div>
         </div>
 
         {/* Success / Failed Badge */}
         {isSuccess ? (
-          <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
             <CheckCircle2 className="w-3.5 h-3.5" />
             <span>Success</span>
           </span>
         ) : (
-          <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/30">
+          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20">
             <XCircle className="w-3.5 h-3.5" />
             <span>Failed</span>
           </span>
@@ -68,12 +67,12 @@ export default function PlatformResult({ result }) {
       </div>
 
       {/* Middle: Details & Meta */}
-      <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-2.5 text-xs">
+      <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-2 text-xs">
         {/* Timestamp */}
         <div className="flex items-center justify-between text-slate-400">
           <span className="flex items-center space-x-1 text-slate-500">
             <Clock className="w-3.5 h-3.5" />
-            <span>Published At (UTC):</span>
+            <span>Published:</span>
           </span>
           <span className="font-mono text-slate-300">
             {date && time ? `${date} ${time}` : date || time || '—'}
